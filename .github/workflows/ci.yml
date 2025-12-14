@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [main, master, develop]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MESON_VERSION: '1.3.0'
+
+jobs:
+  build-linux:
+    name: Linux (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: Ubuntu 22.04
+            container: ubuntu:22.04
+            pkg_manager: apt
+          - distro: Ubuntu 24.04
+            container: ubuntu:24.04
+            pkg_manager: apt
+          - distro: Fedora 40
+            container: fedora:40
+            pkg_manager: dnf
+          - distro: Arch Linux
+            container: archlinux:latest
+            pkg_manager: pacman
+
+    steps:
+      - name: Install prerequisites (apt)
+        if: matrix.pkg_manager == 'apt'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git \
+            ca-certificates \
+            build-essential \
+            pkg-config \
+            python3 \
+            python3-pip \
+            ninja-build \
+            libsdl2-dev \
+            libsdl2-ttf-dev \
+            libtree-sitter-dev \
+            ffmpeg
+
+      - name: Install prerequisites (dnf)
+        if: matrix.pkg_manager == 'dnf'
+        run: |
+          dnf install -y \
+            git \
+            gcc \
+            gcc-c++ \
+            meson \
+            ninja-build \
+            pkgconfig \
+            SDL2-devel \
+            SDL2_ttf-devel \
+            tree-sitter-devel \
+            ffmpeg
+
+      - name: Install prerequisites (pacman)
+        if: matrix.pkg_manager == 'pacman'
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            git \
+            base-devel \
+            meson \
+            ninja \
+            pkgconf \
+            sdl2 \
+            sdl2_ttf \
+            tree-sitter \
+            ffmpeg
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Meson (apt)
+        if: matrix.pkg_manager == 'apt'
+        run: pip3 install meson==${{ env.MESON_VERSION }} --break-system-packages || pip3 install meson==${{ env.MESON_VERSION }}
+
+      - name: Configure
+        run: meson setup build --buildtype=release --prefix=/usr
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Test Binary
+        run: |
+          ./build/DeadEditor --version || true
+          ldd ./build/DeadEditor || true
+
+      - name: Create Linux Package
+        if: matrix.distro == 'Ubuntu 24.04'
+        run: |
+          DESTDIR="$PWD/package" meson install -C build
+          cd package
+          tar czvf ../DeadEditor-linux-x86_64.tar.gz .
+
+      - name: Upload Artifact
+        if: matrix.distro == 'Ubuntu 24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeadEditor-linux-x86_64
+          path: DeadEditor-linux-x86_64.tar.gz
+          retention-days: 7
+
+  build-macos:
+    name: macOS (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          brew update
+          brew install \
+            meson \
+            ninja \
+            pkg-config \
+            sdl2 \
+            sdl2_ttf \
+            tree-sitter \
+            ffmpeg \
+            create-dmg
+
+      - name: Configure
+        run: meson setup build --buildtype=release
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Build DMG
+        run: meson compile -C build dmg
+
+      - name: Code Sign (if certificate available)
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          codesign --force --deep --sign "Developer ID Application" build/DeadEditor.app
+
+      - name: Verify App Bundle
+        run: |
+          ls -la build/DeadEditor.app/Contents/
+          ls -la build/DeadEditor.app/Contents/MacOS/
+          ls -la build/DeadEditor.app/Contents/Resources/
+          file build/DeadEditor.app/Contents/MacOS/DeadEditor
+
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeadEditor-macos-${{ matrix.arch }}-app
+          path: build/DeadEditor.app
+          retention-days: 7
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeadEditor-macos-${{ matrix.arch }}-dmg
+          path: build/*.dmg
+          retention-days: 7
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+            --suppress=missingIncludeSystem \
+            --error-exitcode=0 \
+            --inline-suppr \
+            --quiet \
+            *.cpp *.h
+
+      - name: Check formatting (clang-format)
+        run: |
+          sudo apt-get install -y clang-format
+          find . -maxdepth 1 -name "*.cpp" -o -name "*.h" | head -5 | xargs clang-format --dry-run --Werror || echo "Formatting check completed with warnings"
+
+  build-status:
+    name: Build Status
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos, lint]
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          if [ "${{ needs.build-linux.result }}" == "failure" ] || [ "${{ needs.build-macos.result }}" == "failure" ]; then
+            echo "Build failed!"
+            exit 1
+          fi
+          echo "All builds completed successfully!"

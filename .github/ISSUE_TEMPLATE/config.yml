@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/assada/dead-editor/discussions
+    about: Ask questions and discuss features
+  - name: Security Vulnerabilities
+    url: https://github.com/assada/dead-editor/security/advisories/new
+    about: Report security vulnerabilities privately

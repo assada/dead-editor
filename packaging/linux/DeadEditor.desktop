@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DeadEditor
+GenericName=Text Editor
+Comment=A fast and lightweight code editor
+Exec=DeadEditor %F
+Icon=deadedit
+Terminal=false
+Categories=Development;TextEditor;IDE;
+Keywords=text;editor;code;programming;
+MimeType=text/plain;text/x-csrc;text/x-c++src;text/x-python;text/x-java;text/x-javascript;text/html;text/css;text/x-markdown;application/json;application/xml;text/x-yaml;
+StartupNotify=true
+StartupWMClass=DeadEditor
+

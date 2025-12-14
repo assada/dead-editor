@@ -1,0 +1,53 @@
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'scripts/**'
+
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'meson.build'
+          - 'subprojects/**'
+
+editor:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Editor.cpp'
+          - 'Editor.h'
+
+syntax:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Syntax.cpp'
+          - 'Syntax.h'
+          - 'LanguageRegistry.cpp'
+          - 'LanguageRegistry.h'
+
+terminal:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Terminal.cpp'
+          - 'Terminal.h'
+
+ui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Application.cpp'
+          - 'Application.h'
+          - 'TabBar.h'
+          - 'MenuBar.h'
+          - 'CommandBar.h'
+          - 'FileTree.cpp'
+          - 'FileTree.h'
+
+packaging:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'packaging/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'LICENSE'

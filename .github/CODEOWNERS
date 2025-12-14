@@ -1,0 +1,17 @@
+# Default owners for everything
+* @assada
+
+# CI/CD configuration
+/.github/ @assada
+
+# Build system
+/meson.build @assada
+/subprojects/*.wrap @assada
+
+# Core editor
+/Editor.cpp @assada
+/Editor.h @assada
+
+# Packaging
+/packaging/ @assada
+/scripts/ @assada
