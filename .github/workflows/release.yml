@@ -1,0 +1,425 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  MESON_VERSION: '1.3.0'
+
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v${VERSION}"
+            PRERELEASE="${{ github.event.inputs.prerelease }}"
+          else
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+            if [[ "$TAG" == *"-"* ]]; then
+              PRERELEASE="true"
+            else
+              PRERELEASE="false"
+            fi
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION, Tag: $TAG, Prerelease: $PRERELEASE"
+
+  build-linux:
+    name: Build Linux
+    needs: prepare
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - name: Install prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git \
+            ca-certificates \
+            build-essential \
+            pkg-config \
+            python3 \
+            python3-pip \
+            ninja-build \
+            libsdl2-dev \
+            libsdl2-ttf-dev \
+            libtree-sitter-dev \
+            ffmpeg \
+            file
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Meson
+        run: pip3 install meson==${{ env.MESON_VERSION }} --break-system-packages
+
+      - name: Configure
+        run: meson setup build --buildtype=release --prefix=/usr --strip
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Create tarball
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          DESTDIR="$PWD/DeadEditor-${VERSION}-linux-x86_64" meson install -C build
+          tar czvf "DeadEditor-${VERSION}-linux-x86_64.tar.gz" "DeadEditor-${VERSION}-linux-x86_64"
+
+      - name: Create AppImage
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          apt-get install -y wget fuse libfuse2
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          chmod +x linuxdeploy-x86_64.AppImage
+
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps AppDir/usr/share/DeadEditor
+          cp build/DeadEditor AppDir/usr/bin/
+          cp packaging/linux/DeadEditor.desktop AppDir/usr/share/applications/
+          cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/deadedit.png
+          cp JetBrainsMonoNLNerdFont-Regular.ttf AppDir/usr/share/DeadEditor/
+          cp icon.png AppDir/deadedit.png
+          cp packaging/linux/DeadEditor.desktop AppDir/
+
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage || true
+
+          if [ -f DeadEditor*.AppImage ]; then
+            mv DeadEditor*.AppImage "DeadEditor-${VERSION}-linux-x86_64.AppImage"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            DeadEditor-*.tar.gz
+            DeadEditor-*.AppImage
+          retention-days: 1
+
+  build-macos-intel:
+    name: Build macOS (Intel)
+    needs: prepare
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          brew update
+          brew install meson ninja pkg-config sdl2 sdl2_ttf tree-sitter ffmpeg create-dmg
+
+      - name: Configure
+        run: meson setup build --buildtype=release
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Build DMG
+        run: meson compile -C build dmg
+
+      - name: Import Code Signing Certificate
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import certificate.p12 -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Code Sign
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+        run: |
+          codesign --force --deep --options runtime --sign "$APPLE_IDENTITY" build/DeadEditor.app
+          codesign --verify --deep --strict build/DeadEditor.app
+
+      - name: Notarize
+        if: env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG_FILE=$(ls build/*.dmg | head -1)
+          xcrun notarytool submit "$DMG_FILE" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG_FILE"
+
+      - name: Rename artifacts
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          mv build/*.dmg "DeadEditor-${VERSION}-macos-x86_64.dmg"
+          ditto -c -k --keepParent build/DeadEditor.app "DeadEditor-${VERSION}-macos-x86_64.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-intel-release
+          path: |
+            DeadEditor-*.dmg
+            DeadEditor-*.zip
+          retention-days: 1
+
+  build-macos-arm:
+    name: Build macOS (Apple Silicon)
+    needs: prepare
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          brew update
+          brew install meson ninja pkg-config sdl2 sdl2_ttf tree-sitter ffmpeg create-dmg
+
+      - name: Configure
+        run: meson setup build --buildtype=release
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Build DMG
+        run: meson compile -C build dmg
+
+      - name: Import Code Signing Certificate
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import certificate.p12 -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Code Sign
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+        run: |
+          codesign --force --deep --options runtime --sign "$APPLE_IDENTITY" build/DeadEditor.app
+          codesign --verify --deep --strict build/DeadEditor.app
+
+      - name: Notarize
+        if: env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG_FILE=$(ls build/*.dmg | head -1)
+          xcrun notarytool submit "$DMG_FILE" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG_FILE"
+
+      - name: Rename artifacts
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          mv build/*.dmg "DeadEditor-${VERSION}-macos-arm64.dmg"
+          ditto -c -k --keepParent build/DeadEditor.app "DeadEditor-${VERSION}-macos-arm64.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm-release
+          path: |
+            DeadEditor-*.dmg
+            DeadEditor-*.zip
+          retention-days: 1
+
+  create-release:
+    name: Create Release
+    needs: [prepare, build-linux, build-macos-intel, build-macos-arm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Import GPG key
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "GPG key imported"
+
+      - name: Sign checksums
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          cd release
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --armor --detach-sign SHA256SUMS.txt
+          mv SHA256SUMS.txt.asc SHA256SUMS.txt.sig
+
+      - name: Sign individual files
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          cd release
+          for file in *.tar.gz *.dmg *.zip *.AppImage; do
+            if [ -f "$file" ]; then
+              echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --armor --detach-sign "$file"
+              mv "${file}.asc" "${file}.sig"
+            fi
+          done
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          cat << 'EOF' > release_notes.md
+          ## DeadEditor ${{ needs.prepare.outputs.version }}
+
+          ### Downloads
+
+          | Platform | Architecture | File |
+          |----------|--------------|------|
+          | Linux | x86_64 | `DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64.tar.gz` |
+          | Linux | x86_64 | `DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64.AppImage` |
+          | macOS | Intel (x86_64) | `DeadEditor-${{ needs.prepare.outputs.version }}-macos-x86_64.dmg` |
+          | macOS | Apple Silicon (arm64) | `DeadEditor-${{ needs.prepare.outputs.version }}-macos-arm64.dmg` |
+
+          ### Verification
+
+          All release files are signed with GPG. To verify:
+
+          ```bash
+          # Import the public key (first time only)
+          gpg --keyserver keyserver.ubuntu.com --recv-keys <KEY_ID>
+
+          # Verify checksums signature
+          gpg --verify SHA256SUMS.txt.sig SHA256SUMS.txt
+
+          # Verify file checksums
+          sha256sum -c SHA256SUMS.txt
+
+          # Or verify individual file
+          gpg --verify DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64.tar.gz.sig
+          ```
+
+          ### Installation
+
+          #### Linux (tarball)
+          ```bash
+          tar xzf DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64.tar.gz
+          sudo cp -r DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64/* /
+          ```
+
+          #### Linux (AppImage)
+          ```bash
+          chmod +x DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64.AppImage
+          ./DeadEditor-${{ needs.prepare.outputs.version }}-linux-x86_64.AppImage
+          ```
+
+          #### macOS
+          1. Download the DMG for your architecture
+          2. Open the DMG
+          3. Drag DeadEditor to Applications
+
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: DeadEditor ${{ needs.prepare.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          files: |
+            release/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ needs.prepare.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Prerelease:** ${{ needs.prepare.outputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          ls -la release/ >> $GITHUB_STEP_SUMMARY

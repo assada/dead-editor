@@ -1,0 +1,24 @@
+- [ ] Fix go to def scroll (s)
+- [x] Update git statuses in background (s)
+- [x] Resize file tree widht (s)
+- [x] Copy/Paste in terminal
+- [x] Add more languages (cpp, c, python, lua, zig, yaml, diff, meson) (m)
+- [ ] Fix tree-sitter-markdown (crashes with tree-sitter 0.25.x, see PR #207)
+- [x] Add more languages (toml, json, js, html, css) (m)
+- [ ] Add more languages (Rust, ts, php, go, bash) (s)
+- [x] Create config for each language
+- [ ] Test on binary files
+- [ ] Handle big file
+- [ ] Add notification
+- [ ] Test new file lost char
+- [ ] Fix terminal cmdline spacing (s)
+- [ ] Icons?
+- [ ] Git actions? (git add, commit, pull, push, branch)
+- [ ] Context menu on right click?
+- [ ] Save cursor pos in one session
+- [ ] Theme file?
+- [ ] Configuration? Autosave.
+- [x] Approve exit/close unsaved file (s)
+- [x] MacOS Build.
+- [ ] WINDOWS BUILD?
+- [ ] Memory profile

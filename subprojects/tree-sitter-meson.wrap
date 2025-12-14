@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/tree-sitter-grammars/tree-sitter-meson.git
+revision = v1.3.0
+depth = 1
+patch_directory = tree-sitter-meson
+
+[provide]
+dependency_names = tree-sitter-meson

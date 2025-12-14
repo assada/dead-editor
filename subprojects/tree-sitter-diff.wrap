@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/the-mikedavis/tree-sitter-diff.git
+revision = main
+depth = 1
+patch_directory = tree-sitter-diff
+
+[provide]
+dependency_names = tree-sitter-diff

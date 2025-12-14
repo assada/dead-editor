@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/neovim/libvterm.git
+revision = head
+depth = 1
+patch_directory = libvterm
+
+[provide]
+vterm = vterm_dep

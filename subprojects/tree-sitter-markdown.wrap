@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/mikkihugo/tree-sitter-markdown.git
+revision = update-tree-sitter-0.25
+depth = 1
+patch_directory = tree-sitter-markdown
+
+[provide]
+dependency_names = tree-sitter-markdown

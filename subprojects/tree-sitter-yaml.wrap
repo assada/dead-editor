@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://github.com/tree-sitter-grammars/tree-sitter-yaml.git
+revision = v0.7.0
+depth = 1
+patch_directory = tree-sitter-yaml
+
+[provide]
+dependency_names = tree-sitter-yaml
