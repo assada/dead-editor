@@ -156,8 +156,8 @@ jobs:
       - name: Build
         run: meson compile -C build
 
-      - name: Build DMG
-        run: meson compile -C build dmg
+      - name: Create app bundle
+        run: meson compile -C build app_bundle
 
       - name: Import Code Signing Certificate
         if: env.APPLE_CERTIFICATE != ''
@@ -176,7 +176,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-      - name: Code Sign
+      - name: Code Sign App Bundle
         if: env.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -185,8 +185,24 @@ jobs:
           codesign --force --deep --options runtime --sign "$APPLE_IDENTITY" build/DeadEditor.app
           codesign --verify --deep --strict build/DeadEditor.app
 
+      - name: Ad-hoc Sign (when no certificate)
+        if: env.APPLE_CERTIFICATE == ''
+        run: |
+          codesign --force --deep --sign - build/DeadEditor.app
+
+      - name: Build DMG
+        run: meson compile -C build dmg
+
+      - name: Code Sign DMG
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+        run: |
+          DMG_FILE=$(ls build/*.dmg | head -1)
+          codesign --force --sign "$APPLE_IDENTITY" "$DMG_FILE"
+
       - name: Notarize
-        if: env.APPLE_ID != ''
+        if: env.APPLE_ID != '' && env.APPLE_CERTIFICATE != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -236,8 +252,8 @@ jobs:
       - name: Build
         run: meson compile -C build
 
-      - name: Build DMG
-        run: meson compile -C build dmg
+      - name: Create app bundle
+        run: meson compile -C build app_bundle
 
       - name: Import Code Signing Certificate
         if: env.APPLE_CERTIFICATE != ''
@@ -256,7 +272,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-      - name: Code Sign
+      - name: Code Sign App Bundle
         if: env.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -265,8 +281,24 @@ jobs:
           codesign --force --deep --options runtime --sign "$APPLE_IDENTITY" build/DeadEditor.app
           codesign --verify --deep --strict build/DeadEditor.app
 
+      - name: Ad-hoc Sign (when no certificate)
+        if: env.APPLE_CERTIFICATE == ''
+        run: |
+          codesign --force --deep --sign - build/DeadEditor.app
+
+      - name: Build DMG
+        run: meson compile -C build dmg
+
+      - name: Code Sign DMG
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+        run: |
+          DMG_FILE=$(ls build/*.dmg | head -1)
+          codesign --force --sign "$APPLE_IDENTITY" "$DMG_FILE"
+
       - name: Notarize
-        if: env.APPLE_ID != ''
+        if: env.APPLE_ID != '' && env.APPLE_CERTIFICATE != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -404,6 +436,12 @@ jobs:
           1. Download the DMG for your architecture
           2. Open the DMG
           3. Drag DeadEditor to Applications
+
+          **Note:** If you see "DeadEditor is damaged and can't be opened", run:
+          \`\`\`bash
+          xattr -cr /Applications/DeadEditor.app
+          \`\`\`
+          This removes the quarantine attribute from files downloaded from the internet.
 
           EOF
 

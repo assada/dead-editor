@@ -44,6 +44,11 @@ chmod +x DeadEditor-*.AppImage
 ### macOS
 Open the `.dmg` and drag DeadEditor to Applications.
 
+If you see "DeadEditor is damaged and can't be opened", run:
+```bash
+xattr -cr /Applications/DeadEditor.app
+```
+
 ## License
 
 MIT
