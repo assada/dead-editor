@@ -66,6 +66,9 @@ jobs:
         if: matrix.pkg_manager == 'dnf'
         run: |
           dnf install -y \
+            https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+            https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+          dnf install -y \
             git \
             gcc \
             gcc-c++ \
@@ -74,8 +77,8 @@ jobs:
             pkgconfig \
             SDL2-devel \
             SDL2_ttf-devel \
-            tree-sitter-devel \
-            ffmpeg
+            libtree-sitter-devel \
+            ffmpeg-free
 
       - name: Install prerequisites (pacman)
         if: matrix.pkg_manager == 'pacman'
@@ -107,10 +110,12 @@ jobs:
       - name: Build
         run: meson compile -C build
 
-      - name: Test Binary
+      - name: Verify Binary
         run: |
-          ./build/DeadEditor --version || true
+          test -x ./build/DeadEditor
+          file ./build/DeadEditor
           ldd ./build/DeadEditor || true
+          timeout 3 ./build/DeadEditor || [ $? -eq 124 ]
 
       - name: Create Linux Package
         if: matrix.distro == 'Ubuntu 24.04'
