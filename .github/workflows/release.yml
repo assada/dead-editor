@@ -99,9 +99,17 @@ jobs:
       - name: Create AppImage
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          apt-get install -y wget fuse libfuse2
+          apt-get install -y wget patchelf
+
           wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
           chmod +x linuxdeploy-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appimage-extract
+          mv squashfs-root linuxdeploy
+
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          mv squashfs-root appimagetool
 
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps AppDir/usr/share/DeadEditor
           cp build/DeadEditor AppDir/usr/bin/
@@ -111,9 +119,10 @@ jobs:
           cp icon.png AppDir/deadedit.png
           cp packaging/linux/DeadEditor.desktop AppDir/
 
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage || true
+          ./linuxdeploy/AppRun --appdir AppDir --output appimage || \
+            ./appimagetool/AppRun AppDir "DeadEditor-${VERSION}-linux-x86_64.AppImage"
 
-          if [ -f DeadEditor*.AppImage ]; then
+          if [ -f DeadEditor*.AppImage ] && [ ! -f "DeadEditor-${VERSION}-linux-x86_64.AppImage" ]; then
             mv DeadEditor*.AppImage "DeadEditor-${VERSION}-linux-x86_64.AppImage"
           fi
 
