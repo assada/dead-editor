@@ -4,19 +4,15 @@ on:
   push:
     branches: [main, master, develop]
     paths:
-      - '**.cpp'
-      - '**.h'
-      - '**.c'
-    paths-ignore:
-      - 'subprojects/**'
+      - '*.cpp'
+      - '*.h'
+      - '*.c'
   pull_request:
     branches: [main, master, develop]
     paths:
-      - '**.cpp'
-      - '**.h'
-      - '**.c'
-    paths-ignore:
-      - 'subprojects/**'
+      - '*.cpp'
+      - '*.h'
+      - '*.c'
   schedule:
     - cron: '0 6 * * 1'
 

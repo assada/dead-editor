@@ -60,7 +60,8 @@ jobs:
             libsdl2-dev \
             libsdl2-ttf-dev \
             libtree-sitter-dev \
-            ffmpeg
+            ffmpeg \
+            file
 
       - name: Install prerequisites (dnf)
         if: matrix.pkg_manager == 'dnf'
@@ -78,7 +79,8 @@ jobs:
             SDL2-devel \
             SDL2_ttf-devel \
             libtree-sitter-devel \
-            ffmpeg-free
+            ffmpeg-free \
+            file
 
       - name: Install prerequisites (pacman)
         if: matrix.pkg_manager == 'pacman'
