@@ -3,29 +3,29 @@
 #include <cstring>
 #include <cstdio>
 
-void LinesReadContext::set(const std::vector<std::string>& l, const std::vector<uint32_t>& o) {
+void LinesReadContext::set(const std::vector<std::string>& l, const LineOffsetTree& t) {
     lines = &l;
-    line_offsets = &o;
+    offset_tree = &t;
     last_line_idx = 0;
 }
 
 std::pair<size_t, uint32_t> LinesReadContext::find_line_and_offset(uint32_t byte_index) const {
-    if (line_offsets->size() < 2) {
+    if (offset_tree->empty()) {
         return {0, byte_index};
     }
 
-    size_t max_line = line_offsets->size() - 2;
+    size_t max_line = offset_tree->line_count() - 1;
 
     if (last_line_idx <= max_line) {
-        uint32_t start = (*line_offsets)[last_line_idx];
-        uint32_t end = (*line_offsets)[last_line_idx + 1];
+        uint32_t start = offset_tree->get_line_start_offset(static_cast<int>(last_line_idx));
+        uint32_t end = offset_tree->get_line_end_offset(static_cast<int>(last_line_idx));
         if (byte_index >= start && byte_index < end) {
             return {last_line_idx, byte_index - start};
         }
 
         if (last_line_idx + 1 <= max_line) {
             uint32_t next_start = end;
-            uint32_t next_end = (*line_offsets)[last_line_idx + 2];
+            uint32_t next_end = offset_tree->get_line_end_offset(static_cast<int>(last_line_idx + 1));
             if (byte_index >= next_start && byte_index < next_end) {
                 last_line_idx++;
                 return {last_line_idx, byte_index - next_start};
@@ -33,16 +33,10 @@ std::pair<size_t, uint32_t> LinesReadContext::find_line_and_offset(uint32_t byte
         }
     }
 
-    auto it = std::upper_bound(line_offsets->begin(), line_offsets->end(), byte_index);
-    if (it == line_offsets->begin()) {
-        last_line_idx = 0;
-        return {0, 0};
-    }
-    --it;
-    size_t line_idx = static_cast<size_t>(it - line_offsets->begin());
-    last_line_idx = line_idx;
-    uint32_t offset_in_line = byte_index - *it;
-    return {line_idx, offset_in_line};
+    int line_idx = offset_tree->find_line_by_offset(byte_index);
+    last_line_idx = static_cast<size_t>(line_idx);
+    uint32_t line_start = offset_tree->get_line_start_offset(line_idx);
+    return {last_line_idx, byte_index - line_start};
 }
 
 const char* ts_input_read_callback(
@@ -87,7 +81,7 @@ SyntaxHighlighter::~SyntaxHighlighter() {
     if (parser) ts_parser_delete(parser);
 }
 
-bool SyntaxHighlighter::set_language_for_file(const std::string& filepath, const std::vector<std::string>& lines, const std::vector<uint32_t>& line_offsets) {
+bool SyntaxHighlighter::set_language_for_file(const std::string& filepath, const std::vector<std::string>& lines, const LineOffsetTree& offset_tree) {
     LanguageRegistry& registry = LanguageRegistry::instance();
     const LanguageDefinition* def = registry.detect_language(filepath);
 
@@ -127,14 +121,14 @@ bool SyntaxHighlighter::set_language_for_file(const std::string& filepath, const
     }
 
     if (!lines.empty()) {
-        parse(lines, line_offsets);
+        parse(lines, offset_tree);
     }
 
     return true;
 }
 
-void SyntaxHighlighter::parse(const std::vector<std::string>& lines, const std::vector<uint32_t>& line_offsets) {
-    read_context.set(lines, line_offsets);
+void SyntaxHighlighter::parse(const std::vector<std::string>& lines, const LineOffsetTree& offset_tree) {
+    read_context.set(lines, offset_tree);
 
     TSInput input;
     input.payload = &read_context;
@@ -162,8 +156,8 @@ void SyntaxHighlighter::apply_edit(uint32_t start_byte, uint32_t old_end_byte, u
     ts_tree_edit(tree, &edit);
 }
 
-void SyntaxHighlighter::parse_incremental(const std::vector<std::string>& lines, const std::vector<uint32_t>& line_offsets) {
-    read_context.set(lines, line_offsets);
+void SyntaxHighlighter::parse_incremental(const std::vector<std::string>& lines, const LineOffsetTree& offset_tree) {
+    read_context.set(lines, offset_tree);
 
     TSInput input;
     input.payload = &read_context;
@@ -249,26 +243,30 @@ std::vector<Token> SyntaxHighlighter::get_line_tokens(uint32_t line_start_byte, 
 }
 
 int SyntaxHighlighter::find_line_for_byte_in_range(uint32_t byte_pos, int hint_line, int range_start, int range_end,
-                                                    const std::vector<uint32_t>& line_offsets) const {
+                                                    const LineOffsetTree& offset_tree) const {
     if (hint_line >= range_start && hint_line < range_end) {
-        if (byte_pos >= line_offsets[hint_line] && byte_pos < line_offsets[hint_line + 1]) {
+        uint32_t hint_start = offset_tree.get_line_start_offset(hint_line);
+        uint32_t hint_end = offset_tree.get_line_end_offset(hint_line);
+        if (byte_pos >= hint_start && byte_pos < hint_end) {
             return hint_line;
         }
-        if (hint_line + 1 < range_end && byte_pos >= line_offsets[hint_line + 1] && byte_pos < line_offsets[hint_line + 2]) {
-            return hint_line + 1;
+        if (hint_line + 1 < range_end) {
+            uint32_t next_end = offset_tree.get_line_end_offset(hint_line + 1);
+            if (byte_pos >= hint_end && byte_pos < next_end) {
+                return hint_line + 1;
+            }
         }
     }
 
-    auto it_start = line_offsets.begin() + range_start;
-    auto it_end = line_offsets.begin() + range_end + 1;
-    auto it = std::upper_bound(it_start, it_end, byte_pos);
-    if (it == it_start) return range_start;
-    return static_cast<int>(std::distance(line_offsets.begin(), it)) - 1;
+    int line = offset_tree.find_line_by_offset(byte_pos);
+    if (line < range_start) return range_start;
+    if (line >= range_end) return range_end - 1;
+    return line;
 }
 
 void SyntaxHighlighter::get_viewport_tokens(
     int start_line, int end_line,
-    const std::vector<uint32_t>& line_offsets,
+    const LineOffsetTree& offset_tree,
     const std::vector<std::string>& lines,
     std::unordered_map<int, std::vector<Token>>& result
 ) const {
@@ -284,11 +282,11 @@ void SyntaxHighlighter::get_viewport_tokens(
     if (!tree || !current_language || !current_language->query || start_line < 0 || end_line > static_cast<int>(lines.size())) {
         return;
     }
-    if (line_offsets.empty()) return;
+    if (offset_tree.empty()) return;
 
-    uint32_t vp_start_byte = line_offsets[start_line];
-    uint32_t vp_end_byte = (static_cast<size_t>(end_line) < line_offsets.size())
-        ? line_offsets[end_line] : line_offsets.back();
+    uint32_t vp_start_byte = offset_tree.get_line_start_offset(start_line);
+    uint32_t vp_end_byte = (static_cast<size_t>(end_line) < offset_tree.line_count())
+        ? offset_tree.get_line_start_offset(end_line) : offset_tree.total_bytes();
 
     TSQueryCursor* cursor = ts_query_cursor_new();
     ts_query_cursor_set_byte_range(cursor, vp_start_byte, vp_end_byte);
@@ -306,8 +304,8 @@ void SyntaxHighlighter::get_viewport_tokens(
                 uint32_t node_start = ts_node_start_byte(capture.node);
                 uint32_t node_end = ts_node_end_byte(capture.node);
 
-                int token_start_line = find_line_for_byte_in_range(node_start, last_hint_line, start_line, end_line, line_offsets);
-                int token_end_line = find_line_for_byte_in_range(node_end > 0 ? node_end - 1 : 0, token_start_line, start_line, end_line, line_offsets);
+                int token_start_line = find_line_for_byte_in_range(node_start, last_hint_line, start_line, end_line, offset_tree);
+                int token_end_line = find_line_for_byte_in_range(node_end > 0 ? node_end - 1 : 0, token_start_line, start_line, end_line, offset_tree);
 
                 last_hint_line = token_start_line;
 
@@ -315,8 +313,8 @@ void SyntaxHighlighter::get_viewport_tokens(
                 int loop_end = std::min(token_end_line, end_line - 1);
 
                 for (int line_idx = loop_start; line_idx <= loop_end; line_idx++) {
-                    uint32_t line_start_abs = line_offsets[line_idx];
-                    uint32_t line_end_abs = line_offsets[line_idx + 1] - 1;
+                    uint32_t line_start_abs = offset_tree.get_line_start_offset(line_idx);
+                    uint32_t line_end_abs = offset_tree.get_line_end_offset(line_idx) - 1;
 
                     uint32_t seg_start = std::max(node_start, line_start_abs);
                     uint32_t seg_end = std::min(node_end, line_end_abs + 1);

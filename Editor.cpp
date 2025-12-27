@@ -12,26 +12,16 @@ Editor::Editor() {
 }
 
 void Editor::rebuild_line_offsets() {
-    line_offsets.clear();
-    line_offsets.reserve(lines.size() + 1);
-    uint32_t offset = 0;
-    for (const auto& line : lines) {
-        line_offsets.push_back(offset);
-        offset += static_cast<uint32_t>(line.size()) + 1;
-    }
-    line_offsets.push_back(offset);
+    offset_manager.build_from_lines(lines);
 }
 
 void Editor::update_line_offsets(int start_line, int delta) {
-    if (delta == 0) return;
-    for (size_t i = start_line + 1; i < line_offsets.size(); ++i) {
-        line_offsets[i] += delta;
-    }
+    offset_manager.update(start_line, delta);
 }
 
 uint32_t Editor::get_byte_offset(int line, int col) const {
-    if (line < 0 || line >= static_cast<int>(line_offsets.size()) - 1) return 0;
-    return line_offsets[line] + static_cast<uint32_t>(col);
+    if (line < 0 || line >= static_cast<int>(offset_manager.line_count())) return 0;
+    return offset_manager.get_line_start_offset(line) + static_cast<uint32_t>(col);
 }
 
 void Editor::perform_tree_edit(uint32_t start_byte, uint32_t bytes_removed, uint32_t bytes_added,
@@ -138,10 +128,12 @@ void Editor::apply_delete_internal(int start_line, int start_col, int end_line, 
 
     if (s_line == e_line) {
         lines[s_line].erase(s_col, e_col - s_col);
+        update_line_offsets(s_line, -static_cast<int>(bytes_removed));
     } else {
         std::string new_line_content = lines[s_line].substr(0, s_col) + lines[e_line].substr(e_col);
         lines.erase(lines.begin() + s_line, lines.begin() + e_line + 1);
         lines.insert(lines.begin() + s_line, new_line_content);
+        rebuild_line_offsets();
     }
 
     cursor_line = s_line;
@@ -184,8 +176,8 @@ bool Editor::undo() {
             int affected_start = std::min(block_start, new_block_start);
             int affected_end = std::max(block_end, new_block_end);
 
-            uint32_t start_byte = line_offsets[affected_start];
-            uint32_t end_byte = line_offsets[affected_end + 1];
+            uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
+            uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
             uint32_t byte_len = end_byte - start_byte;
             TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
             TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
@@ -262,8 +254,8 @@ bool Editor::redo() {
             int affected_start = std::min(block_start, new_block_start);
             int affected_end = std::max(block_end, new_block_end);
 
-            uint32_t start_byte = line_offsets[affected_start];
-            uint32_t end_byte = line_offsets[affected_end + 1];
+            uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
+            uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
             uint32_t byte_len = end_byte - start_byte;
             TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
             TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
@@ -311,7 +303,7 @@ void Editor::rebuild_syntax() {
     if (!syntax_dirty) return;
 
     rebuild_line_offsets();
-    highlighter.parse_incremental(lines, line_offsets);
+    highlighter.parse_incremental(lines, offset_manager);
 
     token_cache.clear();
 
@@ -352,7 +344,7 @@ void Editor::prefetch_viewport_tokens(int start_line, int visible_count) {
     }
 
     if (need_fetch) {
-        highlighter.get_viewport_tokens(start_line, end_line, line_offsets, lines, viewport_tokens_buffer);
+        highlighter.get_viewport_tokens(start_line, end_line, offset_manager, lines, viewport_tokens_buffer);
         for (auto& [line_idx, tokens] : viewport_tokens_buffer) {
             token_cache[line_idx] = std::move(tokens);
         }
@@ -760,6 +752,7 @@ void Editor::delete_char() {
         lines[cursor_line].erase(cursor_col, next_pos - cursor_col);
 
         mark_modified();
+        update_line_offsets(cursor_line, -static_cast<int>(bytes_removed));
         perform_tree_edit(start_byte, bytes_removed, 0, start_point, old_end_point, start_point);
 
         EditOperation op;
@@ -782,6 +775,7 @@ void Editor::delete_char() {
         lines.erase(lines.begin() + cursor_line + 1);
 
         mark_modified();
+        rebuild_line_offsets();
         perform_tree_edit(start_byte, 1, 0, start_point, old_end_point, start_point);
 
         EditOperation op;
@@ -1045,8 +1039,8 @@ void Editor::move_line_up() {
     int affected_start = block_start - 1;
     int affected_end = block_end;
 
-    uint32_t start_byte = line_offsets[affected_start];
-    uint32_t end_byte = line_offsets[affected_end + 1];
+    uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
+    uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
     uint32_t byte_len = end_byte - start_byte;
 
     TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
@@ -1099,8 +1093,8 @@ void Editor::move_line_down() {
     int affected_start = block_start;
     int affected_end = block_end + 1;
 
-    uint32_t start_byte = line_offsets[affected_start];
-    uint32_t end_byte = line_offsets[affected_end + 1];
+    uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
+    uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
     uint32_t byte_len = end_byte - start_byte;
 
     TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
@@ -1282,10 +1276,7 @@ bool Editor::load_file(const char* path) {
     lines.shrink_to_fit();
     token_cache.clear();
     viewport_tokens_buffer.clear();
-    line_offsets.clear();
-    line_offsets.shrink_to_fit();
-
-    line_offsets.reserve(fsize / 40);
+    offset_manager.clear();
 
     lines.reserve(fsize / 40);
 
@@ -1293,13 +1284,9 @@ bool Editor::load_file(const char* path) {
     const char* end = ptr + buffer.size();
     const char* line_start = ptr;
 
-    uint32_t current_offset = 0;
-
     while (ptr < end) {
         if (*ptr == '\n') {
             lines.emplace_back(line_start, ptr - line_start);
-            line_offsets.push_back(current_offset);
-            current_offset += static_cast<uint32_t>(ptr - line_start) + 1;
             line_start = ptr + 1;
         }
         ptr++;
@@ -1307,18 +1294,15 @@ bool Editor::load_file(const char* path) {
 
     if (line_start < end) {
         lines.emplace_back(line_start, end - line_start);
-        line_offsets.push_back(current_offset);
-        current_offset += static_cast<uint32_t>(end - line_start);
     } else {
         lines.emplace_back("");
-        line_offsets.push_back(current_offset);
     }
-
-    line_offsets.push_back(current_offset);
 
     if (lines.empty()) {
         lines.push_back("");
     }
+
+    rebuild_line_offsets();
 
     file_path = path;
     cursor_line = 0;
@@ -1356,7 +1340,7 @@ bool Editor::load_file(const char* path) {
         highlighter.tree = nullptr;
     }
 
-    highlighter.set_language_for_file(file_path, lines, line_offsets);
+    highlighter.set_language_for_file(file_path, lines, offset_manager);
 
     return true;
 }
@@ -1366,19 +1350,15 @@ void Editor::load_text(const std::string& text) {
     lines.shrink_to_fit();
     token_cache.clear();
     viewport_tokens_buffer.clear();
-    line_offsets.clear();
-    line_offsets.shrink_to_fit();
+    offset_manager.clear();
 
     const char* ptr = text.data();
     const char* end = ptr + text.size();
     const char* line_start = ptr;
-    uint32_t current_offset = 0;
 
     while (ptr < end) {
         if (*ptr == '\n') {
             lines.emplace_back(line_start, ptr - line_start);
-            line_offsets.push_back(current_offset);
-            current_offset += static_cast<uint32_t>(ptr - line_start) + 1;
             line_start = ptr + 1;
         }
         ptr++;
@@ -1386,18 +1366,15 @@ void Editor::load_text(const std::string& text) {
 
     if (line_start < end) {
         lines.emplace_back(line_start, end - line_start);
-        line_offsets.push_back(current_offset);
-        current_offset += static_cast<uint32_t>(end - line_start);
     } else if (lines.empty() || line_start == end) {
         lines.emplace_back("");
-        line_offsets.push_back(current_offset);
     }
-
-    line_offsets.push_back(current_offset);
 
     if (lines.empty()) {
         lines.push_back("");
     }
+
+    rebuild_line_offsets();
 
     cursor_line = 0;
     cursor_col = 0;
@@ -1434,7 +1411,7 @@ void Editor::load_text(const std::string& text) {
         highlighter.tree = nullptr;
     }
 
-    highlighter.set_language_for_file(file_path, lines, line_offsets);
+    highlighter.set_language_for_file(file_path, lines, offset_manager);
 }
 
 bool Editor::is_identifier_node(TSNode node) const {

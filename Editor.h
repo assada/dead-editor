@@ -6,6 +6,7 @@
 #include "Constants.h"
 #include "Layout.h"
 #include "TextureCache.h"
+#include "LineOffsetTree.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <string>
@@ -17,7 +18,7 @@
 
 struct Editor {
     std::vector<std::string> lines;
-    std::vector<uint32_t> line_offsets;
+    LineOffsetTree offset_manager;
     std::string file_path;
     bool readonly = false;
     int cursor_line = 0;

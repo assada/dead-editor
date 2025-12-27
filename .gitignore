@@ -10,6 +10,7 @@ builddir/
 .env.production.local
 
 .cache/
+.tests/
 
 # Meson subprojects
 subprojects/libvterm/
