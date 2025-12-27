@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdio>
 #include <functional>
+#include "Types.h"
 #include "Constants.h"
 #include "Layout.h"
 #include "Utils.h"
@@ -18,9 +19,8 @@ enum class CommandAction { None, Confirm, Cancel, FindNext };
 struct EditorStatus {
     std::string file_path;
     bool modified = false;
-    int cursor_line = 0;
-    int cursor_col = 0;
-    int total_lines = 0;
+    TextPos cursor_pos;
+    LineIdx total_lines = 0;
 };
 
 struct CommandKeyResult {
@@ -28,8 +28,7 @@ struct CommandKeyResult {
     CommandMode mode = CommandMode::None;
     std::string path;
     std::string input;
-    int line = 0;
-    int col = 0;
+    TextPos pos;
 };
 
 class CommandBar {
@@ -209,7 +208,7 @@ public:
                 case SDLK_RETURN:
                     if (!input.empty()) {
                         result.action = CommandAction::Confirm;
-                        parse_goto_input(input, result.line, result.col);
+                        parse_goto_input(input, result.pos.line, result.pos.col);
                     }
                     confirm_and_close();
                     break;
@@ -278,7 +277,7 @@ public:
         const char* filename = status.file_path.empty() ? "Untitled" : status.file_path.c_str();
         snprintf(status_buf, sizeof(status_buf), "%s%s    Ln %d/%d    Col %d",
                  filename, status.modified ? " *" : "",
-                 status.cursor_line + 1, status.total_lines, status.cursor_col + 1);
+                 status.cursor_pos.line + 1, status.total_lines, status.cursor_pos.col + 1);
 
         int text_y = y + (L->status_bar_height - line_height) / 2;
         texture_cache.render_cached_text(status_buf, Colors::LINE_NUM, x + L->padding, text_y);

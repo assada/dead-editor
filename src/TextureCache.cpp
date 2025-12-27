@@ -1,4 +1,5 @@
 #include "TextureCache.h"
+#include "HandleTypes.h"
 
 void CachedLineRender::destroy() {
     if (texture) {
@@ -121,14 +122,13 @@ void TextureCache::render_cached_text(const std::string& text, SDL_Color color, 
         text_cache.erase(oldest);
     }
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    SurfacePtr surface(TTF_RenderUTF8_Blended(font, text.c_str(), color));
     if (!surface) return;
 
     CachedTexture cached;
-    cached.texture = SDL_CreateTextureFromSurface(renderer, surface);
+    cached.texture = SDL_CreateTextureFromSurface(renderer, surface.get());
     cached.width = surface->w;
     cached.height = surface->h;
-    SDL_FreeSurface(surface);
 
     SDL_Rect rect = {x, y, cached.width, cached.height};
     SDL_RenderCopy(renderer, cached.texture, nullptr, &rect);
@@ -154,14 +154,13 @@ void TextureCache::render_cached_text_right_aligned(const std::string& text, SDL
         text_cache.erase(oldest);
     }
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    SurfacePtr surface(TTF_RenderUTF8_Blended(font, text.c_str(), color));
     if (!surface) return;
 
     CachedTexture cached;
-    cached.texture = SDL_CreateTextureFromSurface(renderer, surface);
+    cached.texture = SDL_CreateTextureFromSurface(renderer, surface.get());
     cached.width = surface->w;
     cached.height = surface->h;
-    SDL_FreeSurface(surface);
 
     SDL_Rect rect = {right_x - cached.width, y, cached.width, cached.height};
     SDL_RenderCopy(renderer, cached.texture, nullptr, &rect);
@@ -177,16 +176,15 @@ SDL_Texture* TextureCache::get_line_number_texture(const std::string& num_str, S
         return it->second.texture;
     }
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, num_str.c_str(), color);
+    SurfacePtr surface(TTF_RenderUTF8_Blended(font, num_str.c_str(), color));
     if (!surface) return nullptr;
 
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface.get());
     CachedTexture cached;
     cached.texture = texture;
     cached.width = surface->w;
     cached.height = surface->h;
     cached.content = num_str;
-    SDL_FreeSurface(surface);
 
     w = cached.width;
     h = cached.height;
@@ -216,13 +214,12 @@ SDL_Surface* TextureCache::render_line_to_surface(
 
     auto blit_segment = [&](const std::string& text, SDL_Color color) {
         if (text.empty()) return;
-        SDL_Surface* seg = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+        SurfacePtr seg(TTF_RenderUTF8_Blended(font, text.c_str(), color));
         if (seg) {
             SDL_Rect dst = {current_x, 0, seg->w, seg->h};
-            SDL_SetSurfaceBlendMode(seg, SDL_BLENDMODE_NONE);
-            SDL_BlitSurface(seg, nullptr, target, &dst);
+            SDL_SetSurfaceBlendMode(seg.get(), SDL_BLENDMODE_NONE);
+            SDL_BlitSurface(seg.get(), nullptr, target, &dst);
             current_x += seg->w;
-            SDL_FreeSurface(seg);
         }
     };
 
@@ -269,12 +266,11 @@ CachedLineRender& TextureCache::get_or_build_line_render(
         return cached;
     }
 
-    SDL_Surface* surface = render_line_to_surface(line_text, tokens, default_color, get_color);
+    SurfacePtr surface(render_line_to_surface(line_text, tokens, default_color, get_color));
     if (surface) {
-        cached.texture = SDL_CreateTextureFromSurface(renderer, surface);
+        cached.texture = SDL_CreateTextureFromSurface(renderer, surface.get());
         cached.width = surface->w;
         cached.height = surface->h;
-        SDL_FreeSurface(surface);
     }
 
     cached.valid = true;

@@ -113,8 +113,8 @@ FileLocation parse_file_argument(const char* arg) {
         size_t second_last = str.rfind(':', last_colon - 1);
         if (second_last != std::string::npos && second_last > 0) {
             loc.path = str.substr(0, second_last);
-            loc.line = safe_stoi(str.substr(second_last + 1, last_colon - second_last - 1));
-            loc.col = safe_stoi(str.substr(last_colon + 1));
+            loc.pos.line = safe_stoi(str.substr(second_last + 1, last_colon - second_last - 1));
+            loc.pos.col = safe_stoi(str.substr(last_colon + 1));
         } else {
             bool is_number = true;
             for (size_t i = last_colon + 1; i < str.size() && is_number; i++) {
@@ -122,7 +122,7 @@ FileLocation parse_file_argument(const char* arg) {
             }
             if (is_number && last_colon + 1 < str.size()) {
                 loc.path = str.substr(0, last_colon);
-                loc.line = safe_stoi(str.substr(last_colon + 1));
+                loc.pos.line = safe_stoi(str.substr(last_colon + 1));
             } else {
                 loc.path = str;
             }
@@ -133,7 +133,7 @@ FileLocation parse_file_argument(const char* arg) {
     return loc;
 }
 
-void parse_goto_input(const std::string& input, int& line, int& col) {
+void parse_goto_input(const std::string& input, LineIdx& line, ColIdx& col) {
     line = 0;
     col = 0;
     size_t colon = input.find(':');
@@ -153,7 +153,7 @@ int utf8_char_len(unsigned char c) {
     return 1;
 }
 
-int utf8_prev_char_start(const std::string& str, int pos) {
+ColIdx utf8_prev_char_start(const std::string& str, ColIdx pos) {
     if (pos <= 0) return 0;
     pos--;
     while (pos > 0 && (str[pos] & 0xC0) == 0x80) {
@@ -162,14 +162,14 @@ int utf8_prev_char_start(const std::string& str, int pos) {
     return pos;
 }
 
-int utf8_next_char_pos(const std::string& str, int pos) {
-    if (pos >= static_cast<int>(str.size())) return static_cast<int>(str.size());
+ColIdx utf8_next_char_pos(const std::string& str, ColIdx pos) {
+    if (pos >= static_cast<ColIdx>(str.size())) return static_cast<ColIdx>(str.size());
     int len = utf8_char_len(static_cast<unsigned char>(str[pos]));
-    return std::min(pos + len, static_cast<int>(str.size()));
+    return std::min(pos + len, static_cast<ColIdx>(str.size()));
 }
 
-uint32_t utf8_decode_at(const std::string& str, int pos) {
-    if (pos < 0 || pos >= static_cast<int>(str.size())) return 0;
+uint32_t utf8_decode_at(const std::string& str, ColIdx pos) {
+    if (pos < 0 || pos >= static_cast<ColIdx>(str.size())) return 0;
     unsigned char c = static_cast<unsigned char>(str[pos]);
 
     if ((c & 0x80) == 0) {

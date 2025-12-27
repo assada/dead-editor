@@ -3,6 +3,34 @@
 #include <string>
 #include <cstdint>
 
+using LineIdx = int32_t;
+using ColIdx = int32_t;
+using ByteOff = uint32_t;
+
+struct TextPos {
+    LineIdx line = 0;
+    ColIdx col = 0;
+
+    auto operator<=>(const TextPos&) const = default;
+
+    TextPos offset(LineIdx dl, ColIdx dc) const { return {line + dl, col + dc}; }
+};
+
+struct TextRange {
+    TextPos start;
+    TextPos end;
+
+    auto operator<=>(const TextRange&) const = default;
+
+    bool is_empty() const { return start == end; }
+    bool contains(TextPos pos) const {
+        if (pos.line < start.line || pos.line > end.line) return false;
+        if (pos.line == start.line && pos.col < start.col) return false;
+        if (pos.line == end.line && pos.col > end.col) return false;
+        return true;
+    }
+};
+
 enum class TokenType {
     Default,
     Keyword,
@@ -19,8 +47,8 @@ enum class TokenType {
 
 struct Token {
     TokenType type;
-    int start;
-    int end;
+    ColIdx start;
+    ColIdx end;
 
     bool operator==(const Token& other) const {
         return type == other.type && start == other.start && end == other.end;
@@ -31,41 +59,21 @@ enum class FocusPanel { FileTree, Editor, Terminal };
 
 struct FileLocation {
     std::string path;
-    int line = 0;
-    int col = 0;
+    TextPos pos;
 };
 
 struct HighlightRange {
-    int line;
-    int start_col;
-    int end_col;
+    LineIdx line;
+    ColIdx start_col;
+    ColIdx end_col;
 };
 
 struct FoldRegion {
-    int start_line;
-    int end_line;
+    LineIdx start_line;
+    LineIdx end_line;
     bool folded = false;
 };
 
 struct SelectionNode {
-    int start_line;
-    int start_col;
-    int end_line;
-    int end_col;
-};
-
-enum class EditOperationType {
-    Insert,
-    Delete,
-    MoveLine
-};
-
-struct EditOperation {
-    EditOperationType type;
-    int line;
-    int col;
-    std::string text;
-    int end_line;
-    int end_col;
-    uint64_t group_id;
+    TextRange range;
 };

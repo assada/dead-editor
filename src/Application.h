@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <string>
 
+#include "HandleTypes.h"
 #include "Layout.h"
 #include "TextureCache.h"
 #include "FontManager.h"
@@ -58,11 +59,11 @@ private:
 
     bool running = true;
 
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    SDL_Cursor* cursor_arrow = nullptr;
-    SDL_Cursor* cursor_resize_ns = nullptr;
-    SDL_Cursor* cursor_resize_ew = nullptr;
+    WindowPtr window;
+    RendererPtr renderer;
+    CursorPtr cursor_arrow;
+    CursorPtr cursor_resize_ns;
+    CursorPtr cursor_resize_ew;
 
     Layout layout;
     FontManager font_manager;

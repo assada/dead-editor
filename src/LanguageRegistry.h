@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Types.h"
-#include <tree_sitter/api.h>
+#include "HandleTypes.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +27,7 @@ struct LanguageDefinition {
 struct LoadedLanguage {
     LanguageConfig config;
     TSQuery* query = nullptr;
+    TSQueryPtr query_owned;
     std::vector<TokenType> capture_map;
 };
 

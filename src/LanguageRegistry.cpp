@@ -467,13 +467,14 @@ LoadedLanguage* LanguageRegistry::get_or_load(const std::string& language_id) {
 
     uint32_t error_offset;
     TSQueryError error_type;
-    loaded->query = ts_query_new(
+    loaded->query_owned.reset(ts_query_new(
         loaded->config.factory(),
         loaded->config.query_source,
         static_cast<uint32_t>(strlen(loaded->config.query_source)),
         &error_offset,
         &error_type
-    );
+    ));
+    loaded->query = loaded->query_owned.get();
 
     if (!loaded->query) {
         fprintf(stderr, "Query compilation error for %s at offset %u, type %d\n",
@@ -488,21 +489,10 @@ LoadedLanguage* LanguageRegistry::get_or_load(const std::string& language_id) {
 }
 
 void LanguageRegistry::unload(const std::string& language_id) {
-    auto it = loaded_.find(language_id);
-    if (it != loaded_.end()) {
-        if (it->second->query) {
-            ts_query_delete(it->second->query);
-        }
-        loaded_.erase(it);
-    }
+    loaded_.erase(language_id);
 }
 
 void LanguageRegistry::unload_all() {
-    for (auto& [id, lang] : loaded_) {
-        if (lang->query) {
-            ts_query_delete(lang->query);
-        }
-    }
     loaded_.clear();
 }
 

@@ -9,7 +9,7 @@ void LinesReadContext::set(const std::vector<std::string>& l, const LineOffsetTr
     last_line_idx = 0;
 }
 
-std::pair<size_t, uint32_t> LinesReadContext::find_line_and_offset(uint32_t byte_index) const {
+std::pair<size_t, ByteOff> LinesReadContext::find_line_and_offset(ByteOff byte_index) const {
     if (offset_tree->empty()) {
         return {0, byte_index};
     }
@@ -17,15 +17,15 @@ std::pair<size_t, uint32_t> LinesReadContext::find_line_and_offset(uint32_t byte
     size_t max_line = offset_tree->line_count() - 1;
 
     if (last_line_idx <= max_line) {
-        uint32_t start = offset_tree->get_line_start_offset(static_cast<int>(last_line_idx));
-        uint32_t end = offset_tree->get_line_end_offset(static_cast<int>(last_line_idx));
+        ByteOff start = offset_tree->get_line_start_offset(static_cast<LineIdx>(last_line_idx));
+        ByteOff end = offset_tree->get_line_end_offset(static_cast<LineIdx>(last_line_idx));
         if (byte_index >= start && byte_index < end) {
             return {last_line_idx, byte_index - start};
         }
 
         if (last_line_idx + 1 <= max_line) {
-            uint32_t next_start = end;
-            uint32_t next_end = offset_tree->get_line_end_offset(static_cast<int>(last_line_idx + 1));
+            ByteOff next_start = end;
+            ByteOff next_end = offset_tree->get_line_end_offset(static_cast<LineIdx>(last_line_idx + 1));
             if (byte_index >= next_start && byte_index < next_end) {
                 last_line_idx++;
                 return {last_line_idx, byte_index - next_start};
@@ -33,9 +33,9 @@ std::pair<size_t, uint32_t> LinesReadContext::find_line_and_offset(uint32_t byte
         }
     }
 
-    int line_idx = offset_tree->find_line_by_offset(byte_index);
+    LineIdx line_idx = offset_tree->find_line_by_offset(byte_index);
     last_line_idx = static_cast<size_t>(line_idx);
-    uint32_t line_start = offset_tree->get_line_start_offset(line_idx);
+    ByteOff line_start = offset_tree->get_line_start_offset(line_idx);
     return {last_line_idx, byte_index - line_start};
 }
 
@@ -72,14 +72,7 @@ const char* ts_input_read_callback(
     return "";
 }
 
-SyntaxHighlighter::SyntaxHighlighter() {
-    parser = ts_parser_new();
-}
-
-SyntaxHighlighter::~SyntaxHighlighter() {
-    if (tree) ts_tree_delete(tree);
-    if (parser) ts_parser_delete(parser);
-}
+SyntaxHighlighter::SyntaxHighlighter() : parser(ts_parser_new()) {}
 
 bool SyntaxHighlighter::set_language_for_file(const std::string& filepath, const std::vector<std::string>& lines, const LineOffsetTree& offset_tree) {
     LanguageRegistry& registry = LanguageRegistry::instance();
@@ -109,16 +102,13 @@ bool SyntaxHighlighter::set_language_for_file(const std::string& filepath, const
         return false;
     }
 
-    if (!ts_parser_set_language(parser, lang)) {
+    if (!ts_parser_set_language(parser.get(), lang)) {
         current_language = nullptr;
         current_language_id.clear();
         return false;
     }
 
-    if (tree) {
-        ts_tree_delete(tree);
-        tree = nullptr;
-    }
+    tree.reset();
 
     if (!lines.empty()) {
         parse(lines, offset_tree);
@@ -135,13 +125,10 @@ void SyntaxHighlighter::parse(const std::vector<std::string>& lines, const LineO
     input.read = ts_input_read_callback;
     input.encoding = TSInputEncodingUTF8;
 
-    if (tree) {
-        ts_tree_delete(tree);
-    }
-    tree = ts_parser_parse(parser, nullptr, input);
+    tree.reset(ts_parser_parse(parser.get(), nullptr, input));
 }
 
-void SyntaxHighlighter::apply_edit(uint32_t start_byte, uint32_t old_end_byte, uint32_t new_end_byte,
+void SyntaxHighlighter::apply_edit(ByteOff start_byte, ByteOff old_end_byte, ByteOff new_end_byte,
                                     TSPoint start_point, TSPoint old_end_point, TSPoint new_end_point) {
     if (!tree) return;
 
@@ -153,7 +140,7 @@ void SyntaxHighlighter::apply_edit(uint32_t start_byte, uint32_t old_end_byte, u
         .old_end_point = old_end_point,
         .new_end_point = new_end_point
     };
-    ts_tree_edit(tree, &edit);
+    ts_tree_edit(tree.get(), &edit);
 }
 
 void SyntaxHighlighter::parse_incremental(const std::vector<std::string>& lines, const LineOffsetTree& offset_tree) {
@@ -164,31 +151,29 @@ void SyntaxHighlighter::parse_incremental(const std::vector<std::string>& lines,
     input.read = ts_input_read_callback;
     input.encoding = TSInputEncodingUTF8;
 
-    TSTree* new_tree = ts_parser_parse(parser, tree, input);
+    TSTree* new_tree = ts_parser_parse(parser.get(), tree.get(), input);
 
     if (new_tree) {
-        if (tree) ts_tree_delete(tree);
-        tree = new_tree;
+        tree.reset(new_tree);
     } else {
-        if (tree) ts_tree_delete(tree);
-        tree = nullptr;
-        ts_parser_reset(parser);
-        tree = ts_parser_parse(parser, nullptr, input);
+        tree.reset();
+        ts_parser_reset(parser.get());
+        tree.reset(ts_parser_parse(parser.get(), nullptr, input));
     }
 }
 
-std::vector<Token> SyntaxHighlighter::get_line_tokens(uint32_t line_start_byte, uint32_t line_end_byte) const {
+std::vector<Token> SyntaxHighlighter::get_line_tokens(ByteOff line_start_byte, ByteOff line_end_byte) const {
     std::vector<Token> tokens;
     if (!tree || !current_language || !current_language->query) {
         return tokens;
     }
 
-    TSQueryCursor* cursor = ts_query_cursor_new();
-    ts_query_cursor_set_byte_range(cursor, line_start_byte, line_end_byte);
-    ts_query_cursor_exec(cursor, current_language->query, ts_tree_root_node(tree));
+    TSQueryCursorPtr cursor(ts_query_cursor_new());
+    ts_query_cursor_set_byte_range(cursor.get(), line_start_byte, line_end_byte);
+    ts_query_cursor_exec(cursor.get(), current_language->query, ts_tree_root_node(tree.get()));
 
     TSQueryMatch match;
-    while (ts_query_cursor_next_match(cursor, &match)) {
+    while (ts_query_cursor_next_match(cursor.get(), &match)) {
         for (uint16_t i = 0; i < match.capture_count; i++) {
             const TSQueryCapture& capture = match.captures[i];
             uint32_t id = capture.index;
@@ -206,8 +191,6 @@ std::vector<Token> SyntaxHighlighter::get_line_tokens(uint32_t line_start_byte, 
             }
         }
     }
-
-    ts_query_cursor_delete(cursor);
 
     std::sort(tokens.begin(), tokens.end(), [](const Token& a, const Token& b) {
         if (a.start != b.start) return a.start < b.start;
@@ -242,33 +225,33 @@ std::vector<Token> SyntaxHighlighter::get_line_tokens(uint32_t line_start_byte, 
     return resolved;
 }
 
-int SyntaxHighlighter::find_line_for_byte_in_range(uint32_t byte_pos, int hint_line, int range_start, int range_end,
+LineIdx SyntaxHighlighter::find_line_for_byte_in_range(ByteOff byte_pos, LineIdx hint_line, LineIdx range_start, LineIdx range_end,
                                                     const LineOffsetTree& offset_tree) const {
     if (hint_line >= range_start && hint_line < range_end) {
-        uint32_t hint_start = offset_tree.get_line_start_offset(hint_line);
-        uint32_t hint_end = offset_tree.get_line_end_offset(hint_line);
+        ByteOff hint_start = offset_tree.get_line_start_offset(hint_line);
+        ByteOff hint_end = offset_tree.get_line_end_offset(hint_line);
         if (byte_pos >= hint_start && byte_pos < hint_end) {
             return hint_line;
         }
         if (hint_line + 1 < range_end) {
-            uint32_t next_end = offset_tree.get_line_end_offset(hint_line + 1);
+            ByteOff next_end = offset_tree.get_line_end_offset(hint_line + 1);
             if (byte_pos >= hint_end && byte_pos < next_end) {
                 return hint_line + 1;
             }
         }
     }
 
-    int line = offset_tree.find_line_by_offset(byte_pos);
+    LineIdx line = offset_tree.find_line_by_offset(byte_pos);
     if (line < range_start) return range_start;
     if (line >= range_end) return range_end - 1;
     return line;
 }
 
 void SyntaxHighlighter::get_viewport_tokens(
-    int start_line, int end_line,
+    LineIdx start_line, LineIdx end_line,
     const LineOffsetTree& offset_tree,
     const std::vector<std::string>& lines,
-    std::unordered_map<int, std::vector<Token>>& result
+    std::unordered_map<LineIdx, std::vector<Token>>& result
 ) const {
     for (auto it = result.begin(); it != result.end(); ) {
         if (it->first < start_line || it->first >= end_line) {
@@ -279,51 +262,51 @@ void SyntaxHighlighter::get_viewport_tokens(
         }
     }
 
-    if (!tree || !current_language || !current_language->query || start_line < 0 || end_line > static_cast<int>(lines.size())) {
+    if (!tree || !current_language || !current_language->query || start_line < 0 || end_line > static_cast<LineIdx>(lines.size())) {
         return;
     }
     if (offset_tree.empty()) return;
 
-    uint32_t vp_start_byte = offset_tree.get_line_start_offset(start_line);
-    uint32_t vp_end_byte = (static_cast<size_t>(end_line) < offset_tree.line_count())
+    ByteOff vp_start_byte = offset_tree.get_line_start_offset(start_line);
+    ByteOff vp_end_byte = (static_cast<size_t>(end_line) < offset_tree.line_count())
         ? offset_tree.get_line_start_offset(end_line) : offset_tree.total_bytes();
 
-    TSQueryCursor* cursor = ts_query_cursor_new();
-    ts_query_cursor_set_byte_range(cursor, vp_start_byte, vp_end_byte);
-    ts_query_cursor_exec(cursor, current_language->query, ts_tree_root_node(tree));
+    TSQueryCursorPtr cursor(ts_query_cursor_new());
+    ts_query_cursor_set_byte_range(cursor.get(), vp_start_byte, vp_end_byte);
+    ts_query_cursor_exec(cursor.get(), current_language->query, ts_tree_root_node(tree.get()));
 
-    int last_hint_line = start_line;
+    LineIdx last_hint_line = start_line;
 
     TSQueryMatch match;
-    while (ts_query_cursor_next_match(cursor, &match)) {
+    while (ts_query_cursor_next_match(cursor.get(), &match)) {
         for (uint16_t i = 0; i < match.capture_count; i++) {
             const TSQueryCapture& capture = match.captures[i];
             uint32_t id = capture.index;
 
             if (id < current_language->capture_map.size() && current_language->capture_map[id] != TokenType::Default) {
-                uint32_t node_start = ts_node_start_byte(capture.node);
-                uint32_t node_end = ts_node_end_byte(capture.node);
+                ByteOff node_start = ts_node_start_byte(capture.node);
+                ByteOff node_end = ts_node_end_byte(capture.node);
 
-                int token_start_line = find_line_for_byte_in_range(node_start, last_hint_line, start_line, end_line, offset_tree);
-                int token_end_line = find_line_for_byte_in_range(node_end > 0 ? node_end - 1 : 0, token_start_line, start_line, end_line, offset_tree);
+                LineIdx token_start_line = find_line_for_byte_in_range(node_start, last_hint_line, start_line, end_line, offset_tree);
+                LineIdx token_end_line = find_line_for_byte_in_range(node_end > 0 ? node_end - 1 : 0, token_start_line, start_line, end_line, offset_tree);
 
                 last_hint_line = token_start_line;
 
-                int loop_start = std::max(token_start_line, start_line);
-                int loop_end = std::min(token_end_line, end_line - 1);
+                LineIdx loop_start = std::max(token_start_line, start_line);
+                LineIdx loop_end = std::min(token_end_line, end_line - 1);
 
-                for (int line_idx = loop_start; line_idx <= loop_end; line_idx++) {
-                    uint32_t line_start_abs = offset_tree.get_line_start_offset(line_idx);
-                    uint32_t line_end_abs = offset_tree.get_line_end_offset(line_idx) - 1;
+                for (LineIdx line_idx = loop_start; line_idx <= loop_end; line_idx++) {
+                    ByteOff line_start_abs = offset_tree.get_line_start_offset(line_idx);
+                    ByteOff line_end_abs = offset_tree.get_line_end_offset(line_idx) - 1;
 
-                    uint32_t seg_start = std::max(node_start, line_start_abs);
-                    uint32_t seg_end = std::min(node_end, line_end_abs + 1);
+                    ByteOff seg_start = std::max(node_start, line_start_abs);
+                    ByteOff seg_end = std::min(node_end, line_end_abs + 1);
 
                     if (seg_start < seg_end) {
-                        int col_start = static_cast<int>(seg_start - line_start_abs);
-                        int col_end = static_cast<int>(seg_end - line_start_abs);
+                        ColIdx col_start = static_cast<ColIdx>(seg_start - line_start_abs);
+                        ColIdx col_end = static_cast<ColIdx>(seg_end - line_start_abs);
 
-                        int line_len = static_cast<int>(lines[line_idx].size());
+                        ColIdx line_len = static_cast<ColIdx>(lines[line_idx].size());
                         if (col_end > line_len) col_end = line_len;
                         if (col_start > line_len) col_start = line_len;
 
@@ -335,8 +318,6 @@ void SyntaxHighlighter::get_viewport_tokens(
             }
         }
     }
-
-    ts_query_cursor_delete(cursor);
 
     static thread_local std::vector<Token> resolved;
     for (auto& [line_idx, tokens] : result) {

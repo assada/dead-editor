@@ -1,4 +1,5 @@
 #include "Terminal.h"
+#include "HandleTypes.h"
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -74,12 +75,11 @@ TerminalGlyphCache::CachedGlyph* TerminalGlyphCache::get_or_create(uint32_t code
     utf8[len] = '\0';
 
     CachedGlyph glyph;
-    SDL_Surface* surf = TTF_RenderUTF8_Blended(font, utf8, fg);
+    SurfacePtr surf(TTF_RenderUTF8_Blended(font, utf8, fg));
     if (surf) {
-        glyph.texture = SDL_CreateTextureFromSurface(renderer, surf);
+        glyph.texture = SDL_CreateTextureFromSurface(renderer, surf.get());
         glyph.width = surf->w;
         glyph.height = surf->h;
-        SDL_FreeSurface(surf);
     }
 
     auto [inserted_it, success] = cache.emplace(key, glyph);

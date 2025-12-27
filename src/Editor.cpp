@@ -1,6 +1,7 @@
 #include "Editor.h"
 #include "Utils.h"
 #include "RenderUtils.h"
+#include "HandleTypes.h"
 #include <fstream>
 #include <algorithm>
 #include <cstring>
@@ -15,16 +16,16 @@ void Editor::rebuild_line_offsets() {
     offset_manager.build_from_lines(lines);
 }
 
-void Editor::update_line_offsets(int start_line, int delta) {
+void Editor::update_line_offsets(LineIdx start_line, int delta) {
     offset_manager.update(start_line, delta);
 }
 
-uint32_t Editor::get_byte_offset(int line, int col) const {
-    if (line < 0 || line >= static_cast<int>(offset_manager.line_count())) return 0;
-    return offset_manager.get_line_start_offset(line) + static_cast<uint32_t>(col);
+ByteOff Editor::get_byte_offset(TextPos pos) const {
+    if (pos.line < 0 || pos.line >= static_cast<LineIdx>(offset_manager.line_count())) return 0;
+    return offset_manager.get_line_start_offset(pos.line) + static_cast<ByteOff>(pos.col);
 }
 
-void Editor::perform_tree_edit(uint32_t start_byte, uint32_t bytes_removed, uint32_t bytes_added,
+void Editor::perform_tree_edit(ByteOff start_byte, ByteOff bytes_removed, ByteOff bytes_added,
                                TSPoint start_point, TSPoint old_end_point, TSPoint new_end_point) {
     highlighter.apply_edit(
         start_byte,
@@ -62,19 +63,15 @@ uint64_t Editor::get_undo_group_id() {
     return current_group_id;
 }
 
-void Editor::push_undo(EditOperation op) {
-    if (undo_stack.size() >= UNDO_HISTORY_MAX) {
-        undo_stack.erase(undo_stack.begin());
-    }
-    undo_stack.push_back(std::move(op));
-    redo_stack.clear();
+void Editor::push_action(EditAction action) {
+    command_manager.push(std::move(action));
 }
 
-void Editor::apply_insert_internal(int line, int col, const std::string& text, int& out_end_line, int& out_end_col) {
+void Editor::apply_insert_internal(LineIdx line, ColIdx col, const std::string& text, LineIdx& out_end_line, ColIdx& out_end_col) {
     cursor_line = line;
     cursor_col = col;
 
-    uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+    uint32_t start_byte = get_byte_offset(cursor_pos());
     TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
     TSPoint old_end_point = start_point;
 
@@ -104,9 +101,11 @@ void Editor::apply_insert_internal(int line, int col, const std::string& text, i
     perform_tree_edit(start_byte, 0, static_cast<uint32_t>(text.size()), start_point, old_end_point, new_end_point);
 }
 
-void Editor::apply_delete_internal(int start_line, int start_col, int end_line, int end_col, std::string& out_deleted) {
-    int s_line = start_line, s_col = start_col;
-    int e_line = end_line, e_col = end_col;
+void Editor::apply_delete_internal(LineIdx start_line, ColIdx start_col, LineIdx end_line, ColIdx end_col, std::string& out_deleted) {
+    LineIdx s_line = start_line;
+    ColIdx s_col = start_col;
+    LineIdx e_line = end_line;
+    ColIdx e_col = end_col;
 
     if (s_line > e_line || (s_line == e_line && s_col > e_col)) {
         std::swap(s_line, e_line);
@@ -120,8 +119,8 @@ void Editor::apply_delete_internal(int start_line, int start_col, int end_line, 
         if (i < e_line) out_deleted += '\n';
     }
 
-    uint32_t start_byte = get_byte_offset(s_line, s_col);
-    uint32_t end_byte = get_byte_offset(e_line, e_col);
+    uint32_t start_byte = get_byte_offset({s_line, s_col});
+    uint32_t end_byte = get_byte_offset({e_line, e_col});
     uint32_t bytes_removed = end_byte - start_byte;
     TSPoint start_point = {static_cast<uint32_t>(s_line), static_cast<uint32_t>(s_col)};
     TSPoint old_end_point = {static_cast<uint32_t>(e_line), static_cast<uint32_t>(e_col)};
@@ -144,159 +143,11 @@ void Editor::apply_delete_internal(int start_line, int start_col, int end_line, 
 }
 
 bool Editor::undo() {
-    if (undo_stack.empty()) return false;
-
-    uint64_t group = undo_stack.back().group_id;
-
-    while (!undo_stack.empty() && undo_stack.back().group_id == group) {
-        EditOperation op = std::move(undo_stack.back());
-        undo_stack.pop_back();
-
-        EditOperation reverse_op;
-        reverse_op.group_id = op.group_id;
-
-        if (op.type == EditOperationType::Insert) {
-            reverse_op.type = EditOperationType::Delete;
-            reverse_op.line = op.line;
-            reverse_op.col = op.col;
-            std::string deleted;
-            apply_delete_internal(op.line, op.col, op.end_line, op.end_col, deleted);
-            reverse_op.text = deleted;
-            reverse_op.end_line = op.end_line;
-            reverse_op.end_col = op.end_col;
-        } else if (op.type == EditOperationType::MoveLine) {
-            reverse_op.type = EditOperationType::MoveLine;
-            int direction = op.col;
-            int block_start = op.line;
-            int block_end = op.end_line;
-
-            int new_block_start = block_start + direction;
-            int new_block_end = block_end + direction;
-
-            int affected_start = std::min(block_start, new_block_start);
-            int affected_end = std::max(block_end, new_block_end);
-
-            uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
-            uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
-            uint32_t byte_len = end_byte - start_byte;
-            TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
-            TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
-
-            if (direction == -1) {
-                std::string moving_line = std::move(lines[new_block_end + 1]);
-                for (int i = new_block_end + 1; i > new_block_start; --i) {
-                    lines[i] = std::move(lines[i - 1]);
-                }
-                lines[new_block_start] = std::move(moving_line);
-            } else {
-                std::string moving_line = std::move(lines[new_block_start - 1]);
-                for (int i = new_block_start - 1; i < new_block_end; ++i) {
-                    lines[i] = std::move(lines[i + 1]);
-                }
-                lines[new_block_end] = std::move(moving_line);
-            }
-
-            cursor_line = block_start;
-            reverse_op.line = new_block_start;
-            reverse_op.col = -direction;
-            reverse_op.end_line = new_block_end;
-            reverse_op.end_col = 0;
-            rebuild_line_offsets();
-            perform_tree_edit(start_byte, byte_len, byte_len, start_point, end_point, end_point);
-        } else {
-            reverse_op.type = EditOperationType::Insert;
-            reverse_op.line = op.line;
-            reverse_op.col = op.col;
-            reverse_op.text = op.text;
-            int out_end_line, out_end_col;
-            apply_insert_internal(op.line, op.col, op.text, out_end_line, out_end_col);
-            reverse_op.end_line = out_end_line;
-            reverse_op.end_col = out_end_col;
-        }
-
-        redo_stack.push_back(std::move(reverse_op));
-    }
-
-    clear_selection();
-    return true;
+    return command_manager.undo(*this);
 }
 
 bool Editor::redo() {
-    if (redo_stack.empty()) return false;
-
-    uint64_t group = redo_stack.back().group_id;
-
-    while (!redo_stack.empty() && redo_stack.back().group_id == group) {
-        EditOperation op = std::move(redo_stack.back());
-        redo_stack.pop_back();
-
-        EditOperation reverse_op;
-        reverse_op.group_id = op.group_id;
-
-        if (op.type == EditOperationType::Insert) {
-            reverse_op.type = EditOperationType::Delete;
-            reverse_op.line = op.line;
-            reverse_op.col = op.col;
-            std::string deleted;
-            apply_delete_internal(op.line, op.col, op.end_line, op.end_col, deleted);
-            reverse_op.text = deleted;
-            reverse_op.end_line = op.end_line;
-            reverse_op.end_col = op.end_col;
-        } else if (op.type == EditOperationType::MoveLine) {
-            reverse_op.type = EditOperationType::MoveLine;
-            int direction = op.col;
-            int block_start = op.line;
-            int block_end = op.end_line;
-
-            int new_block_start = block_start + direction;
-            int new_block_end = block_end + direction;
-
-            int affected_start = std::min(block_start, new_block_start);
-            int affected_end = std::max(block_end, new_block_end);
-
-            uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
-            uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
-            uint32_t byte_len = end_byte - start_byte;
-            TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
-            TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
-
-            if (direction == -1) {
-                std::string moving_line = std::move(lines[block_start - 1]);
-                for (int i = block_start - 1; i < block_end; ++i) {
-                    lines[i] = std::move(lines[i + 1]);
-                }
-                lines[block_end] = std::move(moving_line);
-            } else {
-                std::string moving_line = std::move(lines[block_end + 1]);
-                for (int i = block_end + 1; i > block_start; --i) {
-                    lines[i] = std::move(lines[i - 1]);
-                }
-                lines[block_start] = std::move(moving_line);
-            }
-
-            cursor_line = new_block_start;
-            reverse_op.line = new_block_start;
-            reverse_op.col = -direction;
-            reverse_op.end_line = new_block_end;
-            reverse_op.end_col = 0;
-            rebuild_line_offsets();
-            perform_tree_edit(start_byte, byte_len, byte_len, start_point, end_point, end_point);
-        } else {
-            reverse_op.type = EditOperationType::Insert;
-            reverse_op.line = op.line;
-            reverse_op.col = op.col;
-            reverse_op.text = op.text;
-            int out_end_line, out_end_col;
-            apply_insert_internal(op.line, op.col, op.text, out_end_line, out_end_col);
-            reverse_op.end_line = out_end_line;
-            reverse_op.end_col = out_end_col;
-        }
-
-        undo_stack.push_back(std::move(reverse_op));
-    }
-
-    clear_selection();
-    return true;
+    return command_manager.redo(*this);
 }
 
 void Editor::rebuild_syntax() {
@@ -317,8 +168,8 @@ void Editor::rebuild_syntax() {
     syntax_dirty = false;
 }
 
-void Editor::prefetch_viewport_tokens(int start_line, int visible_count) {
-    start_line = std::max(0, start_line);
+void Editor::prefetch_viewport_tokens(LineIdx start_line, int visible_count) {
+    start_line = std::max(LineIdx{0}, start_line);
 
     int lines_found = 0;
     int current_line = start_line;
@@ -381,30 +232,22 @@ void Editor::start_selection() {
     }
 }
 
-void Editor::get_selection_bounds(int& start_line, int& start_col, int& end_line, int& end_col) const {
+TextRange Editor::get_selection_range() const {
     if (cursor_line < sel_start_line || (cursor_line == sel_start_line && cursor_col < sel_start_col)) {
-        start_line = cursor_line;
-        start_col = cursor_col;
-        end_line = sel_start_line;
-        end_col = sel_start_col;
-    } else {
-        start_line = sel_start_line;
-        start_col = sel_start_col;
-        end_line = cursor_line;
-        end_col = cursor_col;
+        return {{cursor_line, cursor_col}, {sel_start_line, sel_start_col}};
     }
+    return {{sel_start_line, sel_start_col}, {cursor_line, cursor_col}};
 }
 
 std::string Editor::get_selected_text() const {
     if (!has_selection()) return "";
-    int start_line, start_col, end_line, end_col;
-    get_selection_bounds(start_line, start_col, end_line, end_col);
+    auto sel = get_selection_range();
     std::string result;
-    for (int i = start_line; i <= end_line; i++) {
-        int col_start = (i == start_line) ? start_col : 0;
-        int col_end = (i == end_line) ? end_col : static_cast<int>(lines[i].size());
+    for (int i = sel.start.line; i <= sel.end.line; i++) {
+        int col_start = (i == sel.start.line) ? sel.start.col : 0;
+        int col_end = (i == sel.end.line) ? sel.end.col : static_cast<int>(lines[i].size());
         result += lines[i].substr(col_start, col_end - col_start);
-        if (i < end_line) result += '\n';
+        if (i < sel.end.line) result += '\n';
     }
     return result;
 }
@@ -412,41 +255,31 @@ std::string Editor::get_selected_text() const {
 void Editor::delete_selection() {
     if (readonly) return;
     if (!has_selection()) return;
-    int start_line, start_col, end_line, end_col;
-    get_selection_bounds(start_line, start_col, end_line, end_col);
+    auto sel = get_selection_range();
 
     std::string deleted_text = get_selected_text();
     uint64_t group = get_undo_group_id();
 
-    uint32_t start_byte = get_byte_offset(start_line, start_col);
-    uint32_t end_byte = get_byte_offset(end_line, end_col);
+    uint32_t start_byte = get_byte_offset(sel.start);
+    uint32_t end_byte = get_byte_offset(sel.end);
     uint32_t bytes_removed = end_byte - start_byte;
-    TSPoint start_point = {static_cast<uint32_t>(start_line), static_cast<uint32_t>(start_col)};
-    TSPoint old_end_point = {static_cast<uint32_t>(end_line), static_cast<uint32_t>(end_col)};
+    TSPoint start_point = {static_cast<uint32_t>(sel.start.line), static_cast<uint32_t>(sel.start.col)};
+    TSPoint old_end_point = {static_cast<uint32_t>(sel.end.line), static_cast<uint32_t>(sel.end.col)};
 
-    if (start_line == end_line) {
-        lines[start_line].erase(start_col, end_col - start_col);
+    if (sel.start.line == sel.end.line) {
+        lines[sel.start.line].erase(sel.start.col, sel.end.col - sel.start.col);
     } else {
-        std::string new_line_content = lines[start_line].substr(0, start_col) + lines[end_line].substr(end_col);
-        lines.erase(lines.begin() + start_line, lines.begin() + end_line + 1);
-        lines.insert(lines.begin() + start_line, new_line_content);
+        std::string new_line_content = lines[sel.start.line].substr(0, sel.start.col) + lines[sel.end.line].substr(sel.end.col);
+        lines.erase(lines.begin() + sel.start.line, lines.begin() + sel.end.line + 1);
+        lines.insert(lines.begin() + sel.start.line, new_line_content);
     }
 
-    cursor_line = start_line;
-    cursor_col = start_col;
+    set_cursor_pos(sel.start);
     clear_selection();
     mark_modified();
     perform_tree_edit(start_byte, bytes_removed, 0, start_point, old_end_point, start_point);
 
-    EditOperation op;
-    op.type = EditOperationType::Delete;
-    op.line = start_line;
-    op.col = start_col;
-    op.text = deleted_text;
-    op.end_line = end_line;
-    op.end_col = end_col;
-    op.group_id = group;
-    push_undo(std::move(op));
+    push_action(DeleteOp{sel.start.line, sel.start.col, deleted_text, sel.end.line, sel.end.col, group});
 }
 
 void Editor::move_page_up(int visible_lines) {
@@ -465,9 +298,9 @@ void Editor::move_page_down(int visible_lines) {
     }
 }
 
-void Editor::go_to(int line, int col) {
-    cursor_line = std::max(0, std::min(line - 1, static_cast<int>(lines.size()) - 1));
-    cursor_col = std::max(0, std::min(col > 0 ? col - 1 : 0, static_cast<int>(lines[cursor_line].size())));
+void Editor::go_to(TextPos pos) {
+    cursor_line = std::max(0, std::min(pos.line - 1, static_cast<int>(lines.size()) - 1));
+    cursor_col = std::max(0, std::min(pos.col > 0 ? pos.col - 1 : 0, static_cast<int>(lines[cursor_line].size())));
     while (cursor_col > 0 && (lines[cursor_line][cursor_col] & 0xC0) == 0x80) {
         cursor_col--;
     }
@@ -551,7 +384,7 @@ void Editor::insert_text(const char* text) {
     int start_col_pos = cursor_col;
     uint64_t group = get_undo_group_id();
 
-    uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+    uint32_t start_byte = get_byte_offset(cursor_pos());
     TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
     TSPoint old_end_point = start_point;
 
@@ -593,15 +426,7 @@ void Editor::insert_text(const char* text) {
     TSPoint new_end_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col + final_cursor_offset)};
     perform_tree_edit(start_byte, 0, static_cast<uint32_t>(str.size()), start_point, old_end_point, new_end_point);
 
-    EditOperation op;
-    op.type = EditOperationType::Insert;
-    op.line = start_line_pos;
-    op.col = start_col_pos;
-    op.text = str;
-    op.end_line = cursor_line;
-    op.end_col = cursor_col + final_cursor_offset;
-    op.group_id = group;
-    push_undo(std::move(op));
+    push_action(InsertOp{start_line_pos, start_col_pos, str, cursor_line, cursor_col + final_cursor_offset, group});
 }
 
 void Editor::new_line() {
@@ -624,7 +449,7 @@ void Editor::new_line() {
     int start_col_pos = cursor_col;
     uint64_t group = get_undo_group_id();
 
-    uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+    uint32_t start_byte = get_byte_offset(cursor_pos());
     TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
     TSPoint old_end_point = start_point;
 
@@ -645,15 +470,7 @@ void Editor::new_line() {
     TSPoint new_end_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
     perform_tree_edit(start_byte, 0, bytes_added, start_point, old_end_point, new_end_point);
 
-    EditOperation op;
-    op.type = EditOperationType::Insert;
-    op.line = start_line_pos;
-    op.col = start_col_pos;
-    op.text = "\n" + indent;
-    op.end_line = cursor_line;
-    op.end_col = cursor_col;
-    op.group_id = group;
-    push_undo(std::move(op));
+    push_action(InsertOp{start_line_pos, start_col_pos, "\n" + indent, cursor_line, cursor_col, group});
 }
 
 void Editor::backspace() {
@@ -689,19 +506,11 @@ void Editor::backspace() {
         mark_modified();
         update_line_offsets(cursor_line, -static_cast<int>(bytes_removed));
 
-        uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+        uint32_t start_byte = get_byte_offset(cursor_pos());
         TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
         perform_tree_edit(start_byte, bytes_removed, 0, start_point, old_end_point, start_point);
 
-        EditOperation op;
-        op.type = EditOperationType::Delete;
-        op.line = cursor_line;
-        op.col = prev_pos;
-        op.text = deleted_text;
-        op.end_line = cursor_line;
-        op.end_col = orig_col;
-        op.group_id = group;
-        push_undo(std::move(op));
+        push_action(DeleteOp{cursor_line, prev_pos, deleted_text, cursor_line, orig_col, group});
     } else if (cursor_line > 0) {
         int orig_line = cursor_line;
         uint64_t group = get_undo_group_id();
@@ -717,19 +526,11 @@ void Editor::backspace() {
         mark_modified();
         rebuild_line_offsets();
 
-        uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+        uint32_t start_byte = get_byte_offset(cursor_pos());
         TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
         perform_tree_edit(start_byte, 1, 0, start_point, old_end_point, start_point);
 
-        EditOperation op;
-        op.type = EditOperationType::Delete;
-        op.line = cursor_line;
-        op.col = new_col;
-        op.text = "\n";
-        op.end_line = orig_line;
-        op.end_col = 0;
-        op.group_id = group;
-        push_undo(std::move(op));
+        push_action(DeleteOp{cursor_line, new_col, "\n", orig_line, 0, group});
     }
 }
 
@@ -745,7 +546,7 @@ void Editor::delete_char() {
         uint64_t group = get_undo_group_id();
 
         uint32_t bytes_removed = static_cast<uint32_t>(next_pos - cursor_col);
-        uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+        uint32_t start_byte = get_byte_offset(cursor_pos());
         TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
         TSPoint old_end_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(next_pos)};
 
@@ -755,19 +556,11 @@ void Editor::delete_char() {
         update_line_offsets(cursor_line, -static_cast<int>(bytes_removed));
         perform_tree_edit(start_byte, bytes_removed, 0, start_point, old_end_point, start_point);
 
-        EditOperation op;
-        op.type = EditOperationType::Delete;
-        op.line = cursor_line;
-        op.col = cursor_col;
-        op.text = deleted_text;
-        op.end_line = cursor_line;
-        op.end_col = next_pos;
-        op.group_id = group;
-        push_undo(std::move(op));
+        push_action(DeleteOp{cursor_line, cursor_col, deleted_text, cursor_line, next_pos, group});
     } else if (cursor_line < static_cast<int>(lines.size()) - 1) {
         uint64_t group = get_undo_group_id();
 
-        uint32_t start_byte = get_byte_offset(cursor_line, cursor_col);
+        uint32_t start_byte = get_byte_offset(cursor_pos());
         TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(cursor_col)};
         TSPoint old_end_point = {static_cast<uint32_t>(cursor_line + 1), static_cast<uint32_t>(lines[cursor_line + 1].size())};
 
@@ -778,15 +571,7 @@ void Editor::delete_char() {
         rebuild_line_offsets();
         perform_tree_edit(start_byte, 1, 0, start_point, old_end_point, start_point);
 
-        EditOperation op;
-        op.type = EditOperationType::Delete;
-        op.line = cursor_line;
-        op.col = cursor_col;
-        op.text = "\n";
-        op.end_line = cursor_line + 1;
-        op.end_col = 0;
-        op.group_id = group;
-        push_undo(std::move(op));
+        push_action(DeleteOp{cursor_line, cursor_col, "\n", cursor_line + 1, 0, group});
     }
 }
 
@@ -799,10 +584,9 @@ void Editor::toggle_comment() {
     int end_line = cursor_line;
 
     if (has_selection()) {
-        int s_line, s_col, e_line, e_col;
-        get_selection_bounds(s_line, s_col, e_line, e_col);
-        start_line = s_line;
-        end_line = e_line;
+        auto sel = get_selection_range();
+        start_line = sel.start.line;
+        end_line = sel.end.line;
     }
 
     bool all_commented = true;
@@ -846,7 +630,7 @@ void Editor::toggle_comment() {
 
                 std::string deleted = line.substr(del_start, del_len);
 
-                uint32_t start_byte = get_byte_offset(i, del_start);
+                uint32_t start_byte = get_byte_offset({i, del_start});
                 TSPoint start_point = {static_cast<uint32_t>(i), static_cast<uint32_t>(del_start)};
                 TSPoint old_end_point = {static_cast<uint32_t>(i), static_cast<uint32_t>(del_start + del_len)};
 
@@ -854,21 +638,13 @@ void Editor::toggle_comment() {
 
                 perform_tree_edit(start_byte, del_len, 0, start_point, old_end_point, start_point);
 
-                EditOperation op;
-                op.type = EditOperationType::Delete;
-                op.line = i;
-                op.col = del_start;
-                op.text = deleted;
-                op.end_line = i;
-                op.end_col = del_start + del_len;
-                op.group_id = current_group_id;
-                push_undo(std::move(op));
+                push_action(DeleteOp{i, del_start, deleted, i, del_start + del_len, current_group_id});
             }
         } else {
             std::string insert_str = comment_token + " ";
             int insert_pos = min_indent;
 
-            uint32_t start_byte = get_byte_offset(i, insert_pos);
+            uint32_t start_byte = get_byte_offset({i, insert_pos});
             TSPoint start_point = {static_cast<uint32_t>(i), static_cast<uint32_t>(insert_pos)};
 
             line.insert(insert_pos, insert_str);
@@ -876,15 +652,7 @@ void Editor::toggle_comment() {
             TSPoint new_end_point = {static_cast<uint32_t>(i), static_cast<uint32_t>(insert_pos + insert_str.size())};
             perform_tree_edit(start_byte, 0, static_cast<uint32_t>(insert_str.size()), start_point, start_point, new_end_point);
 
-            EditOperation op;
-            op.type = EditOperationType::Insert;
-            op.line = i;
-            op.col = insert_pos;
-            op.text = insert_str;
-            op.end_line = i;
-            op.end_col = insert_pos + static_cast<int>(insert_str.size());
-            op.group_id = current_group_id;
-            push_undo(std::move(op));
+            push_action(InsertOp{i, insert_pos, insert_str, i, insert_pos + static_cast<int>(insert_str.size()), current_group_id});
         }
     }
 
@@ -905,7 +673,7 @@ void Editor::move_right() {
     }
 }
 
-bool Editor::is_word_char_at(const std::string& str, int pos) const {
+bool Editor::is_word_char_at(const std::string& str, ColIdx pos) const {
     return is_word_codepoint(utf8_decode_at(str, pos));
 }
 
@@ -1020,15 +788,44 @@ void Editor::move_down() {
     }
 }
 
+void Editor::move_line_internal(LineIdx block_start, LineIdx block_end, int direction) {
+    LineIdx affected_start = (direction == -1) ? block_start - 1 : block_start;
+    LineIdx affected_end = (direction == -1) ? block_end : block_end + 1;
+
+    uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
+    uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
+    uint32_t byte_len = end_byte - start_byte;
+
+    TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
+    TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
+
+    if (direction == -1) {
+        std::string moving_line = std::move(lines[block_start - 1]);
+        for (int i = block_start - 1; i < block_end; ++i) {
+            lines[i] = std::move(lines[i + 1]);
+        }
+        lines[block_end] = std::move(moving_line);
+    } else {
+        std::string moving_line = std::move(lines[block_end + 1]);
+        for (int i = block_end + 1; i > block_start; --i) {
+            lines[i] = std::move(lines[i - 1]);
+        }
+        lines[block_start] = std::move(moving_line);
+    }
+
+    mark_modified();
+    rebuild_line_offsets();
+    perform_tree_edit(start_byte, byte_len, byte_len, start_point, end_point, end_point);
+}
+
 void Editor::move_line_up() {
     if (readonly) return;
     int block_start, block_end;
 
     if (has_selection()) {
-        int s_line, s_col, e_line, e_col;
-        get_selection_bounds(s_line, s_col, e_line, e_col);
-        block_start = s_line;
-        block_end = e_line;
+        auto sel = get_selection_range();
+        block_start = sel.start.line;
+        block_end = sel.end.line;
     } else {
         block_start = cursor_line;
         block_end = cursor_line;
@@ -1036,42 +833,14 @@ void Editor::move_line_up() {
 
     if (block_start <= 0) return;
 
-    int affected_start = block_start - 1;
-    int affected_end = block_end;
-
-    uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
-    uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
-    uint32_t byte_len = end_byte - start_byte;
-
-    TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
-    TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
-
-    uint64_t group = get_undo_group_id();
-
-    std::string moving_line = std::move(lines[block_start - 1]);
-    for (int i = block_start - 1; i < block_end; ++i) {
-        lines[i] = std::move(lines[i + 1]);
-    }
-    lines[block_end] = std::move(moving_line);
+    move_line_internal(block_start, block_end, -1);
 
     cursor_line--;
     if (has_selection()) {
         sel_start_line--;
     }
 
-    mark_modified();
-    rebuild_line_offsets();
-
-    perform_tree_edit(start_byte, byte_len, byte_len, start_point, end_point, end_point);
-
-    EditOperation op;
-    op.type = EditOperationType::MoveLine;
-    op.line = block_start;
-    op.col = -1;
-    op.end_line = block_end;
-    op.end_col = 0;
-    op.group_id = group;
-    push_undo(std::move(op));
+    push_action(MoveLineOp{block_start, block_end, -1, get_undo_group_id()});
 }
 
 void Editor::move_line_down() {
@@ -1079,10 +848,9 @@ void Editor::move_line_down() {
     int block_start, block_end;
 
     if (has_selection()) {
-        int s_line, s_col, e_line, e_col;
-        get_selection_bounds(s_line, s_col, e_line, e_col);
-        block_start = s_line;
-        block_end = e_line;
+        auto sel = get_selection_range();
+        block_start = sel.start.line;
+        block_end = sel.end.line;
     } else {
         block_start = cursor_line;
         block_end = cursor_line;
@@ -1090,42 +858,14 @@ void Editor::move_line_down() {
 
     if (block_end >= static_cast<int>(lines.size()) - 1) return;
 
-    int affected_start = block_start;
-    int affected_end = block_end + 1;
-
-    uint32_t start_byte = offset_manager.get_line_start_offset(affected_start);
-    uint32_t end_byte = offset_manager.get_line_start_offset(affected_end + 1);
-    uint32_t byte_len = end_byte - start_byte;
-
-    TSPoint start_point = {static_cast<uint32_t>(affected_start), 0};
-    TSPoint end_point = {static_cast<uint32_t>(affected_end + 1), 0};
-
-    uint64_t group = get_undo_group_id();
-
-    std::string moving_line = std::move(lines[block_end + 1]);
-    for (int i = block_end + 1; i > block_start; --i) {
-        lines[i] = std::move(lines[i - 1]);
-    }
-    lines[block_start] = std::move(moving_line);
+    move_line_internal(block_start, block_end, 1);
 
     cursor_line++;
     if (has_selection()) {
         sel_start_line++;
     }
 
-    mark_modified();
-    rebuild_line_offsets();
-
-    perform_tree_edit(start_byte, byte_len, byte_len, start_point, end_point, end_point);
-
-    EditOperation op;
-    op.type = EditOperationType::MoveLine;
-    op.line = block_start;
-    op.col = 1;
-    op.end_line = block_end;
-    op.end_col = 0;
-    op.group_id = group;
-    push_undo(std::move(op));
+    push_action(MoveLineOp{block_start, block_end, 1, get_undo_group_id()});
 }
 
 void Editor::move_home() {
@@ -1140,10 +880,8 @@ void Editor::duplicate_line() {
     if (readonly) return;
     if (has_selection()) {
         std::string selected = get_selected_text();
-        int start_line, start_col, end_line, end_col;
-        get_selection_bounds(start_line, start_col, end_line, end_col);
-        cursor_line = end_line;
-        cursor_col = end_col;
+        auto sel = get_selection_range();
+        set_cursor_pos(sel.end);
         clear_selection();
         insert_text(selected.c_str());
     } else {
@@ -1151,7 +889,7 @@ void Editor::duplicate_line() {
         int orig_line = cursor_line;
         uint64_t group = get_undo_group_id();
 
-        uint32_t start_byte = get_byte_offset(cursor_line, static_cast<int>(current.size()));
+        uint32_t start_byte = get_byte_offset({cursor_line, static_cast<int>(current.size())});
         TSPoint start_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(current.size())};
         TSPoint old_end_point = start_point;
 
@@ -1163,23 +901,15 @@ void Editor::duplicate_line() {
         TSPoint new_end_point = {static_cast<uint32_t>(cursor_line), static_cast<uint32_t>(current.size())};
         perform_tree_edit(start_byte, 0, bytes_added, start_point, old_end_point, new_end_point);
 
-        EditOperation op;
-        op.type = EditOperationType::Insert;
-        op.line = orig_line;
-        op.col = static_cast<int>(current.size());
-        op.text = "\n" + current;
-        op.end_line = cursor_line;
-        op.end_col = static_cast<int>(current.size());
-        op.group_id = group;
-        push_undo(std::move(op));
+        push_action(InsertOp{orig_line, static_cast<int>(current.size()), "\n" + current, cursor_line, static_cast<int>(current.size()), group});
     }
 }
 
-bool Editor::find_next(const std::string& query, int start_line, int start_col) {
+bool Editor::find_next(const std::string& query, TextPos start) {
     if (query.empty()) return false;
     clear_selection();
-    for (int i = start_line; i < static_cast<int>(lines.size()); i++) {
-        size_t search_start = (i == start_line) ? start_col : 0;
+    for (int i = start.line; i < static_cast<int>(lines.size()); i++) {
+        size_t search_start = (i == start.line) ? start.col : 0;
         size_t pos = lines[i].find(query, search_start);
         if (pos != std::string::npos) {
             cursor_line = i;
@@ -1187,8 +917,8 @@ bool Editor::find_next(const std::string& query, int start_line, int start_col) 
             return true;
         }
     }
-    for (int i = 0; i <= start_line; i++) {
-        size_t end_col = (i == start_line) ? start_col : lines[i].size();
+    for (int i = 0; i <= start.line; i++) {
+        size_t end_col = (i == start.line) ? start.col : lines[i].size();
         size_t pos = lines[i].find(query);
         if (pos != std::string::npos && pos < end_col) {
             cursor_line = i;
@@ -1199,11 +929,11 @@ bool Editor::find_next(const std::string& query, int start_line, int start_col) 
     return false;
 }
 
-int Editor::count_visible_lines_between(int from_line, int to_line) const {
+int Editor::count_visible_lines_between(LineIdx from_line, LineIdx to_line) const {
     int count = 0;
-    int start = std::min(from_line, to_line);
-    int end = std::max(from_line, to_line);
-    for (int i = start; i <= end; i++) {
+    LineIdx start = std::min(from_line, to_line);
+    LineIdx end = std::max(from_line, to_line);
+    for (LineIdx i = start; i <= end; i++) {
         if (!is_line_folded(i)) {
             count++;
         }
@@ -1211,22 +941,22 @@ int Editor::count_visible_lines_between(int from_line, int to_line) const {
     return count;
 }
 
-int Editor::get_nth_visible_line_from(int start_line, int n) const {
+LineIdx Editor::get_nth_visible_line_from(LineIdx start_line, int n) const {
     int count = 0;
-    int line = start_line;
+    LineIdx line = start_line;
     int direction = (n >= 0) ? 1 : -1;
     int target = std::abs(n);
-    while (line >= 0 && line < static_cast<int>(lines.size())) {
+    while (line >= 0 && line < static_cast<LineIdx>(lines.size())) {
         if (!is_line_folded(line)) {
             if (count == target) return line;
             count++;
         }
         line += direction;
     }
-    return std::clamp(line - direction, 0, static_cast<int>(lines.size()) - 1);
+    return std::clamp(line - direction, LineIdx{0}, static_cast<LineIdx>(lines.size()) - 1);
 }
 
-int Editor::get_first_visible_line_from(int line) const {
+LineIdx Editor::get_first_visible_line_from(LineIdx line) const {
     while (line > 0 && is_line_folded(line)) {
         line--;
     }
@@ -1312,10 +1042,7 @@ bool Editor::load_file(const char* path) {
     modified = false;
     syntax_dirty = true;
 
-    undo_stack.clear();
-    undo_stack.shrink_to_fit();
-    redo_stack.clear();
-    redo_stack.shrink_to_fit();
+    command_manager.clear();
     current_group_id = 0;
     in_undo_group = false;
 
@@ -1335,11 +1062,7 @@ bool Editor::load_file(const char* path) {
     fold_regions.shrink_to_fit();
     folded_lines.clear();
 
-    if (highlighter.tree) {
-        ts_tree_delete(highlighter.tree);
-        highlighter.tree = nullptr;
-    }
-
+    highlighter.tree.reset();
     highlighter.set_language_for_file(file_path, lines, offset_manager);
 
     return true;
@@ -1383,10 +1106,7 @@ void Editor::load_text(const std::string& text) {
     modified = false;
     syntax_dirty = true;
 
-    undo_stack.clear();
-    undo_stack.shrink_to_fit();
-    redo_stack.clear();
-    redo_stack.shrink_to_fit();
+    command_manager.clear();
     current_group_id = 0;
     in_undo_group = false;
 
@@ -1406,11 +1126,7 @@ void Editor::load_text(const std::string& text) {
     fold_regions.shrink_to_fit();
     folded_lines.clear();
 
-    if (highlighter.tree) {
-        ts_tree_delete(highlighter.tree);
-        highlighter.tree = nullptr;
-    }
-
+    highlighter.tree.reset();
     highlighter.set_language_for_file(file_path, lines, offset_manager);
 }
 
@@ -1456,14 +1172,14 @@ std::string Editor::get_node_text(TSNode node) const {
 
 TSNode Editor::get_identifier_at_cursor() {
     if (!highlighter.tree) return TSNode{};
-    uint32_t byte_offset = get_byte_offset(cursor_line, cursor_col);
-    TSNode root = ts_tree_root_node(highlighter.tree);
+    uint32_t byte_offset = get_byte_offset(cursor_pos());
+    TSNode root = ts_tree_root_node(highlighter.tree.get());
     TSNode node = ts_node_descendant_for_byte_range(root, byte_offset, byte_offset);
     if (is_identifier_node(node)) {
         return node;
     }
     if (cursor_col > 0) {
-        uint32_t prev_byte = get_byte_offset(cursor_line, cursor_col - 1);
+        uint32_t prev_byte = get_byte_offset({cursor_line, cursor_col - 1});
         node = ts_node_descendant_for_byte_range(root, prev_byte, prev_byte);
         if (is_identifier_node(node)) {
             return node;
@@ -1511,7 +1227,7 @@ void Editor::update_highlight_occurrences() {
     std::string name = get_node_text(node);
     if (name.empty()) return;
     highlighted_identifier = name;
-    TSNode root = ts_tree_root_node(highlighter.tree);
+    TSNode root = ts_tree_root_node(highlighter.tree.get());
     collect_identifiers_recursive(root, name, highlight_occurrences);
 }
 
@@ -1676,7 +1392,7 @@ bool Editor::go_to_definition() {
     std::string name = get_node_text(cursor_node);
     if (name.empty()) return false;
 
-    TSNode root = ts_tree_root_node(highlighter.tree);
+    TSNode root = ts_tree_root_node(highlighter.tree.get());
     TSNode target_node = TSNode{};
 
     TSNode current_scope = ts_node_parent(cursor_node);
@@ -1731,19 +1447,18 @@ bool Editor::expand_selection() {
     uint32_t current_start_byte, current_end_byte;
 
     if (has_selection()) {
-        int sel_start_l, sel_start_c, sel_end_l, sel_end_c;
-        get_selection_bounds(sel_start_l, sel_start_c, sel_end_l, sel_end_c);
-        current_start_byte = get_byte_offset(sel_start_l, sel_start_c);
-        current_end_byte = get_byte_offset(sel_end_l, sel_end_c);
+        auto sel = get_selection_range();
+        current_start_byte = get_byte_offset(sel.start);
+        current_end_byte = get_byte_offset(sel.end);
     } else {
-        current_start_byte = get_byte_offset(cursor_line, cursor_col);
+        current_start_byte = get_byte_offset(cursor_pos());
         current_end_byte = current_start_byte;
         if (selection_stack.empty()) {
-            selection_stack.push_back({cursor_line, cursor_col, cursor_line, cursor_col});
+            selection_stack.push_back({{{cursor_line, cursor_col}, {cursor_line, cursor_col}}});
         }
     }
 
-    TSNode root = ts_tree_root_node(highlighter.tree);
+    TSNode root = ts_tree_root_node(highlighter.tree.get());
     TSNode node = ts_node_descendant_for_byte_range(root, current_start_byte, current_end_byte);
 
     if (ts_node_is_null(node)) return false;
@@ -1764,10 +1479,10 @@ bool Editor::expand_selection() {
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
 
-    SelectionNode new_sel = {
-        static_cast<int>(start.row), static_cast<int>(start.column),
+    SelectionNode new_sel = {{{
+        static_cast<int>(start.row), static_cast<int>(start.column)}, {
         static_cast<int>(end.row), static_cast<int>(end.column)
-    };
+    }}};
 
     selection_stack.push_back(new_sel);
     set_selection_from_node(node);
@@ -1782,15 +1497,13 @@ bool Editor::shrink_selection() {
     }
     selection_stack.pop_back();
     const SelectionNode& prev = selection_stack.back();
-    if (prev.start_line == prev.end_line && prev.start_col == prev.end_col) {
+    if (prev.range.is_empty()) {
         clear_selection();
-        cursor_line = prev.start_line;
-        cursor_col = prev.start_col;
+        set_cursor_pos(prev.range.start);
     } else {
-        sel_start_line = prev.start_line;
-        sel_start_col = prev.start_col;
-        cursor_line = prev.end_line;
-        cursor_col = prev.end_col;
+        sel_start_line = prev.range.start.line;
+        sel_start_col = prev.range.start.col;
+        set_cursor_pos(prev.range.end);
         sel_active = true;
     }
     return true;
@@ -1882,7 +1595,7 @@ void Editor::update_fold_regions() {
         }
     }
     fold_regions.clear();
-    TSNode root = ts_tree_root_node(highlighter.tree);
+    TSNode root = ts_tree_root_node(highlighter.tree.get());
     collect_fold_regions_recursive(root);
     for (auto& fr : fold_regions) {
         if (old_folded.count(fr.start_line)) {
@@ -1903,7 +1616,7 @@ void Editor::update_folded_lines() {
     }
 }
 
-FoldRegion* Editor::get_fold_region_at_line(int line) {
+FoldRegion* Editor::get_fold_region_at_line(LineIdx line) {
     for (auto& fr : fold_regions) {
         if (fr.start_line == line) {
             return &fr;
@@ -1912,7 +1625,7 @@ FoldRegion* Editor::get_fold_region_at_line(int line) {
     return nullptr;
 }
 
-bool Editor::toggle_fold_at_line(int line) {
+bool Editor::toggle_fold_at_line(LineIdx line) {
     FoldRegion* fr = get_fold_region_at_line(line);
     if (!fr) return false;
     fr->folded = !fr->folded;
@@ -1921,7 +1634,7 @@ bool Editor::toggle_fold_at_line(int line) {
 }
 
 bool Editor::toggle_fold_at_cursor() {
-    int line = cursor_line;
+    LineIdx line = cursor_line;
     if (toggle_fold_at_line(line)) {
         ensure_cursor_not_in_fold();
         return true;
@@ -1952,11 +1665,11 @@ void Editor::unfold_all() {
     update_folded_lines();
 }
 
-bool Editor::is_line_folded(int line) const {
+bool Editor::is_line_folded(LineIdx line) const {
     return folded_lines.count(line) > 0;
 }
 
-bool Editor::is_fold_start(int line) const {
+bool Editor::is_fold_start(LineIdx line) const {
     for (const auto& fr : fold_regions) {
         if (fr.start_line == line) {
             return true;
@@ -1965,7 +1678,7 @@ bool Editor::is_fold_start(int line) const {
     return false;
 }
 
-bool Editor::is_fold_start_folded(int line) const {
+bool Editor::is_fold_start_folded(LineIdx line) const {
     for (const auto& fr : fold_regions) {
         if (fr.start_line == line) {
             return fr.folded;
@@ -1974,7 +1687,7 @@ bool Editor::is_fold_start_folded(int line) const {
     return false;
 }
 
-int Editor::get_fold_end_line(int start_line) const {
+LineIdx Editor::get_fold_end_line(LineIdx start_line) const {
     for (const auto& fr : fold_regions) {
         if (fr.start_line == start_line) {
             return fr.end_line;
@@ -1988,15 +1701,15 @@ void Editor::ensure_cursor_not_in_fold() {
     for (const auto& fr : fold_regions) {
         if (fr.folded && cursor_line > fr.start_line && cursor_line <= fr.end_line) {
             cursor_line = fr.start_line;
-            cursor_col = std::min(cursor_col, static_cast<int>(lines[cursor_line].size()));
+            cursor_col = std::min(cursor_col, static_cast<ColIdx>(lines[cursor_line].size()));
             return;
         }
     }
 }
 
-int Editor::get_next_visible_line(int from_line, int direction) const {
-    int line = from_line + direction;
-    while (line >= 0 && line < static_cast<int>(lines.size())) {
+LineIdx Editor::get_next_visible_line(LineIdx from_line, int direction) const {
+    LineIdx line = from_line + direction;
+    while (line >= 0 && line < static_cast<LineIdx>(lines.size())) {
         if (!is_line_folded(line)) {
             return line;
         }
@@ -2086,11 +1799,10 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
         }
 
         if (has_selection()) {
-            int sel_start_line_v, sel_start_col_v, sel_end_line_v, sel_end_col_v;
-            get_selection_bounds(sel_start_line_v, sel_start_col_v, sel_end_line_v, sel_end_col_v);
-            if (i >= sel_start_line_v && i <= sel_end_line_v) {
-                int line_start = (i == sel_start_line_v) ? sel_start_col_v : 0;
-                int line_end = (i == sel_end_line_v) ? sel_end_col_v : static_cast<int>(lines[i].size());
+            auto sel = get_selection_range();
+            if (i >= sel.start.line && i <= sel.end.line) {
+                int line_start = (i == sel.start.line) ? sel.start.col : 0;
+                int line_end = (i == sel.end.line) ? sel.end.col : static_cast<int>(lines[i].size());
                 int x_start = text_x;
                 if (line_start > 0) {
                     int w = 0;
@@ -2101,7 +1813,7 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
                 if (line_end > line_start) {
                     TTF_SizeUTF8(font, lines[i].substr(line_start, line_end - line_start).c_str(), &sel_w, nullptr);
                 }
-                if (i < sel_end_line_v && line_end == static_cast<int>(lines[i].size())) {
+                if (i < sel.end.line && line_end == static_cast<int>(lines[i].size())) {
                     sel_w += char_width;
                 }
                 if (sel_w > 0) {
@@ -2165,16 +1877,14 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
                     });
                 }
 
-                SDL_Surface* surf = texture_cache.render_line_to_surface(sub_text, sub_tokens, Colors::TEXT, syntax_color_func);
+                SurfacePtr surf(texture_cache.render_line_to_surface(sub_text, sub_tokens, Colors::TEXT, syntax_color_func));
                 if (surf) {
-                    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+                    TexturePtr tex(SDL_CreateTextureFromSurface(renderer, surf.get()));
                     if (tex) {
                         int offset_x_local = start_char_idx * char_width;
                         SDL_Rect dst = {text_x + offset_x_local, y, surf->w, surf->h};
-                        SDL_RenderCopy(renderer, tex, nullptr, &dst);
-                        SDL_DestroyTexture(tex);
+                        SDL_RenderCopy(renderer, tex.get(), nullptr, &dst);
                     }
-                    SDL_FreeSurface(surf);
                 }
             } else {
                 CachedLineRender& cached = texture_cache.get_or_build_line_render(
@@ -2342,8 +2052,8 @@ bool Editor::is_point_in_scrollbar(int x, int y, int x_offset, int y_offset, int
            y >= y_offset && y < y_offset + visible_height;
 }
 
-void Editor::scroll_to_line(int target_line) {
-    target_line = std::max(0, std::min(target_line, static_cast<int>(lines.size()) - 1));
+void Editor::scroll_to_line(LineIdx target_line) {
+    target_line = std::max(LineIdx{0}, std::min(target_line, static_cast<LineIdx>(lines.size()) - 1));
     scroll_y = get_first_visible_line_from(target_line);
 }
 

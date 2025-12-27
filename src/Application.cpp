@@ -16,9 +16,9 @@ Application::Application(int argc, char* argv[]) {
             action_open_folder(argv[1]);
         } else {
             FileLocation loc = parse_file_argument(argv[1]);
-            if (action_open_file(loc.path) && loc.line > 0) {
+            if (action_open_file(loc.path) && loc.pos.line > 0) {
                 if (auto* ed = tab_bar.get_active_editor()) {
-                    ed->go_to(loc.line, loc.col);
+                    ed->go_to(loc.pos);
                 }
             }
         }
@@ -30,11 +30,11 @@ Application::~Application() {
     texture_cache.invalidate_all();
     terminal.destroy();
     font_manager.close();
-    SDL_FreeCursor(cursor_arrow);
-    SDL_FreeCursor(cursor_resize_ns);
-    SDL_FreeCursor(cursor_resize_ew);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    cursor_arrow.reset();
+    cursor_resize_ns.reset();
+    cursor_resize_ew.reset();
+    renderer.reset();
+    window.reset();
     TTF_Quit();
     SDL_Quit();
 }
@@ -44,28 +44,27 @@ void Application::init_systems() {
     TTF_Init();
     register_all_languages();
 
-    window = SDL_CreateWindow(
+    window.reset(SDL_CreateWindow(
         APP_NAME,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_WIDTH, WINDOW_HEIGHT,
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
-    );
+    ));
 
     std::string icon_path = get_resource_path("icon.bmp");
-    if (SDL_Surface* icon = SDL_LoadBMP(icon_path.c_str())) {
-        SDL_SetWindowIcon(window, icon);
-        SDL_FreeSurface(icon);
+    if (SurfacePtr icon{SDL_LoadBMP(icon_path.c_str())}; icon) {
+        SDL_SetWindowIcon(window.get(), icon.get());
     }
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    renderer.reset(SDL_CreateRenderer(window.get(), -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC));
 
-    SDL_GetRendererOutputSize(renderer, &window_w, &window_h);
+    SDL_GetRendererOutputSize(renderer.get(), &window_w, &window_h);
     layout.update(static_cast<float>(window_w) / WINDOW_WIDTH);
 
-    cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
-    cursor_resize_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
-    cursor_resize_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
+    cursor_arrow.reset(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
+    cursor_resize_ns.reset(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS));
+    cursor_resize_ew.reset(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE));
 }
 
 void Application::init_ui() {
@@ -82,7 +81,7 @@ void Application::init_ui() {
     menu_bar.set_layout(&layout);
     menu_bar.set_font(font_manager.get());
 
-    texture_cache.init(renderer, font_manager.get());
+    texture_cache.init(renderer.get(), font_manager.get());
     terminal_height = layout.scaled(250);
     tree_width = layout.file_tree_width;
 
@@ -174,7 +173,7 @@ void Application::process_events() {
 
 void Application::handle_window_resize(const SDL_Event& event) {
     if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
-        SDL_GetRendererOutputSize(renderer, &window_w, &window_h);
+        SDL_GetRendererOutputSize(renderer.get(), &window_w, &window_h);
         layout.update(static_cast<float>(window_w) / event.window.data1);
     }
 }
@@ -307,7 +306,7 @@ void Application::handle_global_shortcuts(const SDL_Event& event, SDL_Keycode ke
         if (key == SDLK_F3 && !command_bar.get_search_query().empty()) {
             if (auto* ed = tab_bar.get_active_editor()) {
                 int next_col = ed->cursor_col + static_cast<int>(command_bar.get_search_query().size());
-                if (ed->find_next(command_bar.get_search_query(), ed->cursor_line, next_col)) {
+                if (ed->find_next(command_bar.get_search_query(), {ed->cursor_line, next_col})) {
                     cursor_moved = true;
                 }
             }
@@ -372,7 +371,7 @@ void Application::handle_command_bar_key(const SDL_Event& event) {
                 break;
             case CommandMode::GoTo:
                 if (auto* ed = tab_bar.get_active_editor()) {
-                    ed->go_to(result.line, result.col);
+                    ed->go_to(result.pos);
                     cursor_moved = true;
                 }
                 break;
@@ -397,7 +396,7 @@ void Application::handle_command_bar_key(const SDL_Event& event) {
     } else if (result.action == CommandAction::FindNext) {
         if (auto* ed = tab_bar.get_active_editor()) {
             int next_col = ed->cursor_col + static_cast<int>(result.input.size());
-            if (ed->find_next(result.input, ed->cursor_line, next_col)) {
+            if (ed->find_next(result.input, {ed->cursor_line, next_col})) {
                 cursor_moved = true;
             }
         }
@@ -447,11 +446,11 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
 
         if (show_terminal && my >= term_y - 5 && my <= term_y + 5) {
             dragging.terminal = true;
-            SDL_SetCursor(cursor_resize_ns);
+            SDL_SetCursor(cursor_resize_ns.get());
         }
         if (file_tree.is_loaded() && !dragging.terminal && mx >= tree_w - 5 && mx <= tree_w + 5 && my >= layout.menu_bar_height && my < term_y) {
             dragging.tree = true;
-            SDL_SetCursor(cursor_resize_ew);
+            SDL_SetCursor(cursor_resize_ew.get());
         }
 
         if (!dragging.terminal && !dragging.tree) {
@@ -490,7 +489,7 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
                 if (mx >= tree_w && my >= editor_y && my < term_y) {
                     if (is_meta_pressed()) {
                         ed->update_cursor_from_mouse(mx, my, tree_w, editor_y, font_manager.get());
-                        ed->go_to_definition();
+                        if (ed->go_to_definition()) cursor_moved = true;
                     } else if (event.button.clicks == 2) {
                         ed->handle_mouse_double_click(mx, my, tree_w, editor_y, font_manager.get());
                     } else {
@@ -512,8 +511,8 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         if (auto* ed = tab_bar.get_active_editor()) {
             ed->handle_mouse_up();
         }
-        if (dragging.terminal) { dragging.terminal = false; SDL_SetCursor(cursor_arrow); }
-        if (dragging.tree) { dragging.tree = false; SDL_SetCursor(cursor_arrow); }
+        if (dragging.terminal) { dragging.terminal = false; SDL_SetCursor(cursor_arrow.get()); }
+        if (dragging.tree) { dragging.tree = false; SDL_SetCursor(cursor_arrow.get()); }
         if (menu_click_consumed) { menu_click_consumed = false; dragging.editor = false; return; }
 
         if (file_tree.is_loaded() && mx < tree_w && my >= layout.menu_bar_height && my < term_y) {
@@ -570,15 +569,15 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         bool on_tree_border = file_tree.is_loaded() && motion_x >= tree_w - 5 && motion_x <= tree_w + 5 && motion_y >= layout.menu_bar_height && motion_y < term_y;
         bool on_term_border = show_terminal && motion_y >= term_y - 5 && motion_y <= term_y + 5;
 
-        if (on_tree_border) SDL_SetCursor(cursor_resize_ew);
-        else if (on_term_border) SDL_SetCursor(cursor_resize_ns);
-        else SDL_SetCursor(cursor_arrow);
+        if (on_tree_border) SDL_SetCursor(cursor_resize_ew.get());
+        else if (on_term_border) SDL_SetCursor(cursor_resize_ns.get());
+        else SDL_SetCursor(cursor_arrow.get());
     }
 }
 
 void Application::render() {
-    SDL_SetRenderDrawColor(renderer, Colors::BG.r, Colors::BG.g, Colors::BG.b, 255);
-    SDL_RenderClear(renderer);
+    SDL_SetRenderDrawColor(renderer.get(), Colors::BG.r, Colors::BG.g, Colors::BG.b, 255);
+    SDL_RenderClear(renderer.get());
 
     int line_h = font_manager.get_line_height();
     int tree_w = get_tree_width();
@@ -595,22 +594,22 @@ void Application::render() {
     Editor* ed = tab_bar.get_active_editor();
     if (ed) ed->update_highlight_occurrences();
 
-    menu_bar.render(renderer, texture_cache, window_w, line_h);
+    menu_bar.render(renderer.get(), texture_cache, window_w, line_h);
 
     if (file_tree.is_loaded()) {
         std::string cur_path = ed ? ed->file_path : "";
-        file_tree.render(renderer, font_manager.get(), texture_cache,
+        file_tree.render(renderer.get(), font_manager.get(), texture_cache,
                         0, layout.menu_bar_height, tree_w, command_bar_y - layout.menu_bar_height, line_h,
                         focus == FocusPanel::FileTree, cursor_visible, cur_path);
     }
 
     if (tab_bar.has_tabs()) {
-        tab_bar.render(renderer, texture_cache, tree_w, layout.menu_bar_height,
+        tab_bar.render(renderer.get(), texture_cache, tree_w, layout.menu_bar_height,
                       window_w - tree_w, line_h, file_tree.is_loaded() ? &file_tree : nullptr);
     }
 
     if (ed) {
-        ed->render(renderer, font_manager.get(), texture_cache,
+        ed->render(renderer.get(), font_manager.get(), texture_cache,
                   command_bar.get_search_query(),
                   tree_w, content_y,
                   window_w - tree_w, content_h,
@@ -620,35 +619,34 @@ void Application::render() {
                   [this](TokenType t) { return get_syntax_color(t); });
     }
 
-    command_bar.render(renderer, font_manager.get(), texture_cache,
+    command_bar.render(renderer.get(), font_manager.get(), texture_cache,
                       0, command_bar_y, window_w, line_h, cursor_visible);
 
     EditorStatus status;
     if (ed) {
         status.file_path = ed->file_path;
         status.modified = ed->modified;
-        status.cursor_line = ed->cursor_line;
-        status.cursor_col = ed->cursor_col;
+        status.cursor_pos = ed->cursor_pos();
         status.total_lines = static_cast<int>(ed->lines.size());
     }
-    command_bar.render_status_bar(renderer, texture_cache,
+    command_bar.render_status_bar(renderer.get(), texture_cache,
                                   0, status_bar_y, window_w, line_h, status, file_tree.git_branch);
 
     if (show_terminal && terminal.is_running()) {
-        SDL_SetRenderDrawColor(renderer, 18, 18, 22, 255);
+        SDL_SetRenderDrawColor(renderer.get(), 18, 18, 22, 255);
         SDL_Rect term_bg = {0, terminal_y, window_w, terminal_height};
-        SDL_RenderFillRect(renderer, &term_bg);
+        SDL_RenderFillRect(renderer.get(), &term_bg);
 
-        SDL_SetRenderDrawColor(renderer, 60, 60, 70, 255);
-        SDL_RenderDrawLine(renderer, 0, terminal_y, window_w, terminal_y);
+        SDL_SetRenderDrawColor(renderer.get(), 60, 60, 70, 255);
+        SDL_RenderDrawLine(renderer.get(), 0, terminal_y, window_w, terminal_y);
 
-        terminal.render(renderer, font_manager.get(), layout.padding, terminal_y + layout.padding,
+        terminal.render(renderer.get(), font_manager.get(), layout.padding, terminal_y + layout.padding,
                        window_w - layout.padding * 2, terminal_height - layout.padding * 2);
     }
 
-    menu_bar.render_dropdown_overlay(renderer, texture_cache, line_h);
+    menu_bar.render_dropdown_overlay(renderer.get(), texture_cache, line_h);
 
-    SDL_RenderPresent(renderer);
+    SDL_RenderPresent(renderer.get());
 }
 
 bool Application::action_open_file(const std::string& path) {
@@ -766,7 +764,7 @@ void Application::toggle_terminal() {
         if (!terminal.is_running()) {
             terminal.spawn(window_w - get_tree_width(), terminal_height - layout.padding * 2,
                           font_manager.get_char_width(), font_manager.get_line_height(),
-                          &focus, renderer, font_manager.get());
+                          &focus, renderer.get(), font_manager.get());
         }
         focus = FocusPanel::Terminal;
     } else {
@@ -789,7 +787,7 @@ void Application::toggle_focus() {
 void Application::update_title(const std::string& path) {
     std::string title = APP_NAME;
     if (!path.empty()) title += " - " + path;
-    SDL_SetWindowTitle(window, title.c_str());
+    SDL_SetWindowTitle(window.get(), title.c_str());
 }
 
 void Application::ensure_cursor_visible() {

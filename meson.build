@@ -1,6 +1,6 @@
 project('dead_editor', ['c', 'cpp'],
   version : '0.2.0',
-  default_options : ['cpp_std=c++17', 'c_std=c11', 'warning_level=2']
+  default_options : ['cpp_std=c++23', 'c_std=c11', 'warning_level=2']
 )
 
 generate_version_script = files('scripts/generate_version.sh')
@@ -79,6 +79,7 @@ sources = [
   'src/Terminal.cpp',
   'src/Editor.cpp',
   'src/LanguageRegistry.cpp',
+  'src/CommandManager.cpp',
 ]
 
 dead_editor = executable('DeadEditor',
