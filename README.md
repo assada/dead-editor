@@ -4,6 +4,8 @@ A fast, lightweight code editor built with SDL2.
 
 ![CI](https://github.com/assada/dead-editor/actions/workflows/ci.yml/badge.svg)
 
+![screenshot](./docs/shot.png)
+
 ## Requirements
 
 ### Linux
