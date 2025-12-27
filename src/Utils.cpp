@@ -1,6 +1,6 @@
 #include "Utils.h"
+#include "HandleTypes.h"
 #include <stdexcept>
-#include <cstdio>
 #include <cctype>
 #include <algorithm>
 #include <sys/stat.h>
@@ -22,14 +22,13 @@ int safe_stoi(const std::string& str, int default_value = 0) {
 namespace {
 
 std::string run_dialog_command(const std::string& command) {
-    FILE* pipe = popen(command.c_str(), "r");
+    PipeHandle pipe(popen(command.c_str(), "r"));
     if (!pipe) return "";
     char buffer[4096];
     std::string result;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
+    while (fgets(buffer, sizeof(buffer), pipe.get())) {
         result += buffer;
     }
-    pclose(pipe);
     while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
         result.pop_back();
     }

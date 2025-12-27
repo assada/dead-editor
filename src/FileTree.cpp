@@ -1,4 +1,5 @@
 #include "FileTree.h"
+#include "HandleTypes.h"
 #include "Utils.h"
 #include "RenderUtils.h"
 #include "Constants.h"
@@ -6,32 +7,30 @@
 #include <filesystem>
 #include <thread>
 #include <algorithm>
-#include <cstdio>
 
 std::string get_git_branch(const std::string& path) {
     const std::string cmd = "cd \"" + path + "\" && git rev-parse --abbrev-ref HEAD 2>/dev/null";
-    FILE* pipe = popen(cmd.c_str(), "r");
+    PipeHandle pipe(popen(cmd.c_str(), "r"));
     if (!pipe) return "";
     char buffer[256];
     std::string result;
-    if (fgets(buffer, sizeof(buffer), pipe)) {
+    if (fgets(buffer, sizeof(buffer), pipe.get())) {
         result = buffer;
         if (!result.empty() && result.back() == '\n') {
             result.pop_back();
         }
     }
-    pclose(pipe);
     return result;
 }
 
 GitStatus get_git_status(const std::string& path) {
     GitStatus status;
     const std::string cmd = "cd \"" + path + "\" && git status --porcelain 2>/dev/null";
-    FILE* pipe = popen(cmd.c_str(), "r");
+    PipeHandle pipe(popen(cmd.c_str(), "r"));
     if (!pipe) return status;
 
     char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), pipe)) {
+    while (fgets(buffer, sizeof(buffer), pipe.get())) {
         std::string line(buffer);
         if (line.size() < 4) continue;
 
@@ -60,7 +59,6 @@ GitStatus get_git_status(const std::string& path) {
             target_set.insert(p.string());
         }
     }
-    pclose(pipe);
     return status;
 }
 

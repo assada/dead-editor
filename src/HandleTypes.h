@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <cstdio>
 #include <SDL2/SDL.h>
 #include <tree_sitter/api.h>
 
@@ -25,3 +26,8 @@ using TSParserPtr = Handle<TSParser, ts_parser_delete>;
 using TSTreePtr = Handle<TSTree, ts_tree_delete>;
 using TSQueryPtr = Handle<TSQuery, ts_query_delete>;
 using TSQueryCursorPtr = Handle<TSQueryCursor, ts_query_cursor_delete>;
+
+struct PipeDeleter {
+    void operator()(FILE* f) const { if (f) pclose(f); }
+};
+using PipeHandle = std::unique_ptr<FILE, PipeDeleter>;
