@@ -10,8 +10,8 @@
 - [ ] Test on binary files
 - [ ] Handle big file
 - [ ] Add notification
-- [ ] Test new file lost char
-- [ ] Fix terminal cmdline spacing (s)
+- [x] Test new file lost char
+- [x] Fix terminal cmdline spacing (s)
 - [ ] Icons?
 - [ ] Git actions? (git add, commit, pull, push, branch)
 - [ ] Context menu on right click?
