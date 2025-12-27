@@ -6,7 +6,8 @@
 #include <string>
 #include <cstdint>
 
-struct Editor;
+class TextDocument;
+class EditorController;
 
 struct InsertOp {
     LineIdx line;
@@ -15,9 +16,6 @@ struct InsertOp {
     LineIdx end_line;
     ColIdx end_col;
     uint64_t group_id;
-
-    void apply(Editor& ed);
-    void revert(Editor& ed);
 };
 
 struct DeleteOp {
@@ -27,9 +25,6 @@ struct DeleteOp {
     LineIdx end_line;
     ColIdx end_col;
     uint64_t group_id;
-
-    void apply(Editor& ed);
-    void revert(Editor& ed);
 };
 
 struct MoveLineOp {
@@ -37,9 +32,6 @@ struct MoveLineOp {
     LineIdx block_end;
     int direction;
     uint64_t group_id;
-
-    void apply(Editor& ed);
-    void revert(Editor& ed);
 };
 
 using EditAction = std::variant<InsertOp, DeleteOp, MoveLineOp>;
@@ -47,6 +39,14 @@ using EditAction = std::variant<InsertOp, DeleteOp, MoveLineOp>;
 inline uint64_t get_action_group_id(const EditAction& action) {
     return std::visit([](const auto& op) { return op.group_id; }, action);
 }
+
+void apply_action(InsertOp& op, TextDocument& doc, EditorController& ctrl);
+void apply_action(DeleteOp& op, TextDocument& doc, EditorController& ctrl);
+void apply_action(MoveLineOp& op, TextDocument& doc, EditorController& ctrl);
+
+void revert_action(InsertOp& op, TextDocument& doc, EditorController& ctrl);
+void revert_action(DeleteOp& op, TextDocument& doc, EditorController& ctrl);
+void revert_action(MoveLineOp& op, TextDocument& doc, EditorController& ctrl);
 
 class CommandManager {
     std::vector<EditAction> undo_stack;
@@ -64,11 +64,11 @@ public:
         redo_stack.clear();
     }
 
-    bool undo(Editor& ed);
-    bool redo(Editor& ed);
-
     bool can_undo() const { return !undo_stack.empty(); }
     bool can_redo() const { return !redo_stack.empty(); }
+
+    std::vector<EditAction>& get_undo_stack() { return undo_stack; }
+    std::vector<EditAction>& get_redo_stack() { return redo_stack; }
 
     void clear() {
         undo_stack.clear();

@@ -87,8 +87,8 @@ public:
         if (mode == CommandMode::Delete || mode == CommandMode::SavePrompt) {
             just_confirmed = true;
         }
-        if (mode == CommandMode::Search && !input.empty()) {
-            last_search = input;
+        if (mode == CommandMode::Search) {
+            last_search.clear();
         }
         mode = CommandMode::None;
         input.clear();

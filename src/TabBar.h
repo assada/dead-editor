@@ -19,16 +19,16 @@ struct Tab {
 
     Tab() : editor(std::make_unique<Editor>()) {}
 
-    bool is_modified() const { return editor && editor->modified; }
+    bool is_modified() const { return editor && editor->is_modified(); }
 
     const std::string& get_path() const {
         static std::string empty;
-        return editor ? editor->file_path : empty;
+        return editor ? editor->get_file_path() : empty;
     }
 
     void update_title() {
-        if (editor && !editor->file_path.empty()) {
-            title = std::filesystem::path(editor->file_path).filename().string();
+        if (editor && !editor->get_file_path().empty()) {
+            title = std::filesystem::path(editor->get_file_path()).filename().string();
         } else {
             title = "Untitled";
         }
@@ -125,7 +125,7 @@ public:
         }
 
         Tab new_tab;
-        new_tab.editor->line_height = line_height;
+        new_tab.editor->set_line_height(line_height);
         if (!new_tab.editor->load_file(path.c_str())) {
             return -1;
         }
@@ -138,7 +138,7 @@ public:
 
     int create_new_tab(int line_height) {
         Tab new_tab;
-        new_tab.editor->line_height = line_height;
+        new_tab.editor->set_line_height(line_height);
         new_tab.title = "Untitled";
         tabs.push_back(std::move(new_tab));
         active_tab = static_cast<int>(tabs.size()) - 1;
@@ -154,9 +154,9 @@ public:
         }
 
         Tab new_tab;
-        new_tab.editor->line_height = line_height;
+        new_tab.editor->set_line_height(line_height);
         new_tab.editor->load_text(content);
-        new_tab.editor->readonly = true;
+        new_tab.editor->set_readonly(true);
         new_tab.title = title;
         tabs.push_back(std::move(new_tab));
         active_tab = static_cast<int>(tabs.size()) - 1;

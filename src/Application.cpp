@@ -91,7 +91,7 @@ void Application::init_ui() {
         .save_file = [this]() { action_save_current(); },
         .save_file_as = [this](const std::string& path) {
             if (auto* ed = tab_bar.get_active_editor()) {
-                ed->file_path = path;
+                ed->set_file_path(path);
                 action_save_current();
             }
         },
@@ -305,8 +305,8 @@ void Application::handle_global_shortcuts(const SDL_Event& event, SDL_Keycode ke
         }
         if (key == SDLK_F3 && !command_bar.get_search_query().empty()) {
             if (auto* ed = tab_bar.get_active_editor()) {
-                int next_col = ed->cursor_col + static_cast<int>(command_bar.get_search_query().size());
-                if (ed->find_next(command_bar.get_search_query(), {ed->cursor_line, next_col})) {
+                int next_col = ed->get_cursor_col() + static_cast<int>(command_bar.get_search_query().size());
+                if (ed->find_next(command_bar.get_search_query(), {ed->get_cursor_line(), next_col})) {
                     cursor_moved = true;
                 }
             }
@@ -328,7 +328,7 @@ void Application::handle_global_shortcuts(const SDL_Event& event, SDL_Keycode ke
             tab_bar.prev_tab();
             tab_bar.ensure_tab_visible(window_w - get_tree_width());
             if (auto* ed = tab_bar.get_active_editor()) {
-                update_title(ed->file_path);
+                update_title(ed->get_file_path());
                 texture_cache.invalidate_all();
                 cursor_moved = true;
             }
@@ -338,7 +338,7 @@ void Application::handle_global_shortcuts(const SDL_Event& event, SDL_Keycode ke
             tab_bar.next_tab();
             tab_bar.ensure_tab_visible(window_w - get_tree_width());
             if (auto* ed = tab_bar.get_active_editor()) {
-                update_title(ed->file_path);
+                update_title(ed->get_file_path());
                 texture_cache.invalidate_all();
                 cursor_moved = true;
             }
@@ -395,8 +395,8 @@ void Application::handle_command_bar_key(const SDL_Event& event) {
         }
     } else if (result.action == CommandAction::FindNext) {
         if (auto* ed = tab_bar.get_active_editor()) {
-            int next_col = ed->cursor_col + static_cast<int>(result.input.size());
-            if (ed->find_next(result.input, {ed->cursor_line, next_col})) {
+            int next_col = ed->get_cursor_col() + static_cast<int>(result.input.size());
+            if (ed->find_next(result.input, {ed->get_cursor_line(), next_col})) {
                 cursor_moved = true;
             }
         }
@@ -461,7 +461,7 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
                 if (click.action == TabAction::SwitchTab) {
                     tab_bar.switch_to_tab(click.tab_index);
                     if (auto* ed = tab_bar.get_active_editor()) {
-                        update_title(ed->file_path);
+                        update_title(ed->get_file_path());
                         texture_cache.invalidate_all();
                         cursor_moved = true;
                     }
@@ -496,7 +496,7 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
                         int ed_visible_w = window_w - tree_w;
                         int ed_visible_h = term_y - editor_y;
                         ed->handle_mouse_click(mx, my, tree_w, editor_y, ed_visible_w, ed_visible_h, font_manager.get());
-                        if (!ed->scrollbar_dragging) {
+                        if (!ed->is_scrollbar_dragging()) {
                             dragging.editor = true;
                             cursor_moved = true;
                         }
@@ -547,7 +547,7 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
             int ed_visible_w = window_w - tree_w;
             int ed_visible_h = term_y - editor_y;
 
-            if (ed->scrollbar_dragging) {
+            if (ed->is_scrollbar_dragging()) {
                 ed->handle_mouse_drag(motion_x, motion_y, tree_w, editor_y, ed_visible_w, ed_visible_h, font_manager.get());
                 return;
             }
@@ -597,7 +597,7 @@ void Application::render() {
     menu_bar.render(renderer.get(), texture_cache, window_w, line_h);
 
     if (file_tree.is_loaded()) {
-        std::string cur_path = ed ? ed->file_path : "";
+        std::string cur_path = ed ? ed->get_file_path() : "";
         file_tree.render(renderer.get(), font_manager.get(), texture_cache,
                         0, layout.menu_bar_height, tree_w, command_bar_y - layout.menu_bar_height, line_h,
                         focus == FocusPanel::FileTree, cursor_visible, cur_path);
@@ -624,10 +624,10 @@ void Application::render() {
 
     EditorStatus status;
     if (ed) {
-        status.file_path = ed->file_path;
-        status.modified = ed->modified;
+        status.file_path = ed->get_file_path();
+        status.modified = ed->is_modified();
         status.cursor_pos = ed->cursor_pos();
-        status.total_lines = static_cast<int>(ed->lines.size());
+        status.total_lines = static_cast<int>(ed->get_lines().size());
     }
     command_bar.render_status_bar(renderer.get(), texture_cache,
                                   0, status_bar_y, window_w, line_h, status, file_tree.git_branch);
@@ -675,7 +675,7 @@ void Application::action_save_current() {
     if (auto* ed = tab_bar.get_active_editor()) {
         if (ed->save_file()) {
             tab_bar.update_active_title();
-            update_title(ed->file_path);
+            update_title(ed->get_file_path());
             file_tree.refresh_git_status_async();
         }
     }
@@ -688,7 +688,7 @@ void Application::action_close_tab(int index) {
         }
     } else {
         if (tab_bar.has_tabs()) {
-            if (auto* ed = tab_bar.get_active_editor()) update_title(ed->file_path);
+            if (auto* ed = tab_bar.get_active_editor()) update_title(ed->get_file_path());
         } else {
             update_title();
             focus = FocusPanel::FileTree;
@@ -800,8 +800,8 @@ void Application::ensure_cursor_visible() {
         int tree_w = get_tree_width();
         int visible_w = window_w - tree_w - layout.gutter_width - layout.padding;
         int cursor_px = 0;
-        if (ed->cursor_col > 0 && !ed->lines[ed->cursor_line].empty()) {
-            TTF_SizeUTF8(font_manager.get(), ed->lines[ed->cursor_line].substr(0, ed->cursor_col).c_str(), &cursor_px, nullptr);
+        if (ed->get_cursor_col() > 0 && !ed->get_lines()[ed->get_cursor_line()].empty()) {
+            TTF_SizeUTF8(font_manager.get(), ed->get_lines()[ed->get_cursor_line()].substr(0, ed->get_cursor_col()).c_str(), &cursor_px, nullptr);
         }
         ed->ensure_visible_x(cursor_px, visible_w, font_manager.get_char_width() * 2);
     }
@@ -828,8 +828,8 @@ void Application::on_font_changed() {
     tab_bar.set_font(font_manager.get());
     menu_bar.set_font(font_manager.get());
     if (auto* ed = tab_bar.get_active_editor()) {
-        ed->line_height = font_manager.get_line_height();
-        ed->syntax_dirty = true;
+        ed->set_line_height(font_manager.get_line_height());
+        ed->set_syntax_dirty(true);
     }
 }
 
