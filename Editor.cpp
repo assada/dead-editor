@@ -1240,13 +1240,14 @@ int Editor::get_first_visible_line_from(int line) const {
 }
 
 void Editor::ensure_visible(int visible_lines) {
-    int cursor_visible = get_first_visible_line_from(cursor_line);
-    if (cursor_visible < scroll_y) {
-        scroll_y = cursor_visible;
-    }
-    int visible_from_scroll = count_visible_lines_between(scroll_y, cursor_visible);
-    if (visible_from_scroll > visible_lines) {
-        int lines_to_skip = visible_from_scroll - visible_lines;
+    int cursor_visual = get_first_visible_line_from(cursor_line);
+    int lines_from_top = count_visible_lines_between(scroll_y, cursor_visual);
+
+    if (cursor_visual < scroll_y) {
+        scroll_y = cursor_visual;
+    } else if (lines_from_top >= visible_lines) {
+        int target_from_top = visible_lines - 1;
+        int lines_to_skip = lines_from_top - target_from_top;
         scroll_y = get_nth_visible_line_from(scroll_y, lines_to_skip);
     }
     scroll_y = get_first_visible_line_from(scroll_y);
@@ -1730,7 +1731,6 @@ found:
         TSPoint start = ts_node_start_point(target_node);
         cursor_line = static_cast<int>(start.row);
         cursor_col = static_cast<int>(start.column);
-        ensure_visible(10);
         clear_selection();
         return true;
     }
@@ -2033,9 +2033,14 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
                     int x_offset, int y_offset, int visible_width, int visible_height,
                     int window_w, int char_width,
                     bool has_focus, bool is_file_open, bool cursor_visible,
+                    const Layout& layout,
                     std::function<SDL_Color(TokenType)> syntax_color_func) {
 
-    int visible_lines = (visible_height - PADDING * 2) / line_height;
+    scaled_scrollbar_width = layout.scrollbar_width;
+    scaled_scrollbar_min_thumb = layout.scrollbar_min_thumb_height;
+
+    int visible_end_y = y_offset + visible_height;
+    int visible_lines = visible_height / line_height;
     int text_x = x_offset + GUTTER_WIDTH + PADDING - scroll_x;
     int y = y_offset;
 
@@ -2044,7 +2049,7 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
     SDL_RenderFillRect(renderer, &gutter_rect);
 
     char line_num_buf[16];
-    for (int i = scroll_y; i < static_cast<int>(lines.size()) && y < visible_height; i++) {
+    for (int i = scroll_y; i < static_cast<int>(lines.size()) && y < visible_end_y; i++) {
         if (is_line_folded(i)) continue;
 
         bool is_cursor_line = (i == cursor_line) && is_file_open;
@@ -2065,7 +2070,7 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
         y += line_height;
     }
 
-    SDL_Rect text_clip = {x_offset + GUTTER_WIDTH, y_offset, visible_width, visible_height};
+    SDL_Rect text_clip = {x_offset + GUTTER_WIDTH, y_offset, visible_width - GUTTER_WIDTH, visible_height};
     SDL_RenderSetClipRect(renderer, &text_clip);
 
     if (syntax_dirty) {
@@ -2077,12 +2082,12 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
     prefetch_viewport_tokens(scroll_y, visible_lines + 5);
 
     y = y_offset;
-    for (int i = scroll_y; i < static_cast<int>(lines.size()) && y < visible_height; i++) {
+    for (int i = scroll_y; i < static_cast<int>(lines.size()) && y < visible_end_y; i++) {
         if (is_line_folded(i)) continue;
 
         if (i == cursor_line && is_file_open && has_focus) {
             SDL_SetRenderDrawColor(renderer, Colors::ACTIVE_LINE.r, Colors::ACTIVE_LINE.g, Colors::ACTIVE_LINE.b, 255);
-            SDL_Rect active_line_rect = {x_offset + GUTTER_WIDTH, y, visible_width, line_height};
+            SDL_Rect active_line_rect = {x_offset + GUTTER_WIDTH, y, visible_width - GUTTER_WIDTH, line_height};
             SDL_RenderFillRect(renderer, &active_line_rect);
         }
 
@@ -2230,6 +2235,28 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
     }
 
     SDL_RenderSetClipRect(renderer, nullptr);
+
+    int total_visible = get_total_visible_lines();
+    int visible_lines_count = visible_height / line_height;
+    if (total_visible > visible_lines_count) {
+        int scrollbar_x = x_offset + visible_width - scaled_scrollbar_width;
+
+        SDL_SetRenderDrawColor(renderer, Colors::SCROLLBAR_BG.r, Colors::SCROLLBAR_BG.g, Colors::SCROLLBAR_BG.b, 255);
+        SDL_Rect scrollbar_bg = {scrollbar_x, y_offset, scaled_scrollbar_width, visible_height};
+        SDL_RenderFillRect(renderer, &scrollbar_bg);
+
+        int thumb_height, thumb_y_pos;
+        get_scrollbar_metrics(visible_height, scaled_scrollbar_min_thumb, thumb_height, thumb_y_pos);
+
+        SDL_Color thumb_color = scrollbar_dragging ? Colors::SCROLLBAR_THUMB_ACTIVE :
+                                (scrollbar_hovered ? Colors::SCROLLBAR_THUMB_HOVER : Colors::SCROLLBAR_THUMB);
+        SDL_SetRenderDrawColor(renderer, thumb_color.r, thumb_color.g, thumb_color.b, 255);
+
+        int thumb_margin = layout.scaled(2);
+        SDL_Rect thumb_rect = {scrollbar_x + thumb_margin, y_offset + thumb_y_pos,
+                               scaled_scrollbar_width - thumb_margin * 2, thumb_height};
+        SDL_RenderFillRect(renderer, &thumb_rect);
+    }
 }
 
 void Editor::handle_scroll(int wheel_x, int wheel_y, int char_w, bool shift_held) {
@@ -2301,7 +2328,74 @@ void Editor::update_cursor_from_mouse(int x, int y, int x_offset, int y_offset, 
     }
 }
 
-void Editor::handle_mouse_click(int x, int y, int x_offset, int y_offset, TTF_Font* font) {
+int Editor::get_total_visible_lines() const {
+    int count = 0;
+    for (int i = 0; i < static_cast<int>(lines.size()); i++) {
+        if (!is_line_folded(i)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+void Editor::get_scrollbar_metrics(int visible_height, int min_thumb_height, int& thumb_height, int& thumb_y) const {
+    int total_visible = get_total_visible_lines();
+    int visible_lines = visible_height / line_height;
+
+    if (total_visible <= visible_lines) {
+        thumb_height = visible_height;
+        thumb_y = 0;
+        return;
+    }
+
+    float thumb_ratio = static_cast<float>(visible_lines) / total_visible;
+    thumb_height = std::max(min_thumb_height, static_cast<int>(visible_height * thumb_ratio));
+
+    int scroll_y_visible = (scroll_y > 0) ? count_visible_lines_between(0, scroll_y - 1) : 0;
+    int max_scroll_visible = total_visible - visible_lines;
+    float scroll_ratio = (max_scroll_visible > 0) ? static_cast<float>(scroll_y_visible) / max_scroll_visible : 0.0f;
+    scroll_ratio = std::max(0.0f, std::min(1.0f, scroll_ratio));
+
+    thumb_y = static_cast<int>(scroll_ratio * (visible_height - thumb_height));
+}
+
+bool Editor::is_point_in_scrollbar(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height) const {
+    int scrollbar_x = x_offset + visible_width - scaled_scrollbar_width;
+    return x >= scrollbar_x && x < x_offset + visible_width &&
+           y >= y_offset && y < y_offset + visible_height;
+}
+
+void Editor::scroll_to_line(int target_line) {
+    target_line = std::max(0, std::min(target_line, static_cast<int>(lines.size()) - 1));
+    scroll_y = get_first_visible_line_from(target_line);
+}
+
+void Editor::handle_mouse_click(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height, TTF_Font* font) {
+    if (is_point_in_scrollbar(x, y, x_offset, y_offset, visible_width, visible_height)) {
+        int thumb_height, thumb_y;
+        get_scrollbar_metrics(visible_height, scaled_scrollbar_min_thumb, thumb_height, thumb_y);
+
+        int relative_y = y - y_offset;
+
+        if (relative_y >= thumb_y && relative_y < thumb_y + thumb_height) {
+            scrollbar_dragging = true;
+            scrollbar_drag_offset = relative_y - thumb_y;
+        } else {
+            int total_visible = get_total_visible_lines();
+            int visible_lines = visible_height / line_height;
+            int track_height = visible_height - thumb_height;
+            int thumb_center_y = relative_y - thumb_height / 2;
+            thumb_center_y = std::max(0, std::min(thumb_center_y, track_height));
+            float click_ratio = (track_height > 0) ? static_cast<float>(thumb_center_y) / track_height : 0.0f;
+            int target_visible_line = static_cast<int>(click_ratio * (total_visible - visible_lines));
+            int target_line = get_nth_visible_line_from(0, target_visible_line);
+            scroll_to_line(target_line);
+            scrollbar_dragging = true;
+            scrollbar_drag_offset = thumb_height / 2;
+        }
+        return;
+    }
+
     clear_selection();
     update_cursor_from_mouse(x, y, x_offset, y_offset, font);
     start_selection();
@@ -2312,8 +2406,36 @@ void Editor::handle_mouse_double_click(int x, int y, int x_offset, int y_offset,
     select_word_at_cursor();
 }
 
-void Editor::handle_mouse_drag(int x, int y, int x_offset, int y_offset, TTF_Font* font) {
+void Editor::handle_mouse_drag(int x, int y, int x_offset, int y_offset, [[maybe_unused]] int visible_width, int visible_height, TTF_Font* font) {
+    if (scrollbar_dragging) {
+        int relative_y = y - y_offset - scrollbar_drag_offset;
+        int thumb_height, thumb_y_unused;
+        get_scrollbar_metrics(visible_height, scaled_scrollbar_min_thumb, thumb_height, thumb_y_unused);
+
+        int track_height = visible_height - thumb_height;
+        float scroll_ratio = (track_height > 0) ? static_cast<float>(relative_y) / track_height : 0.0f;
+        scroll_ratio = std::max(0.0f, std::min(1.0f, scroll_ratio));
+
+        int total_visible = get_total_visible_lines();
+        int visible_lines = visible_height / line_height;
+        int target_visible_line = static_cast<int>(scroll_ratio * (total_visible - visible_lines));
+        int target_line = get_nth_visible_line_from(0, target_visible_line);
+        scroll_to_line(target_line);
+        return;
+    }
+
     update_cursor_from_mouse(x, y, x_offset, y_offset, font);
+}
+
+void Editor::handle_mouse_up() {
+    scrollbar_dragging = false;
+    if (sel_active && sel_start_line == cursor_line && sel_start_col == cursor_col) {
+        clear_selection();
+    }
+}
+
+void Editor::handle_mouse_move(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height) {
+    scrollbar_hovered = is_point_in_scrollbar(x, y, x_offset, y_offset, visible_width, visible_height);
 }
 
 void Editor::select_word_at_cursor() {

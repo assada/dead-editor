@@ -21,6 +21,9 @@ constexpr int TERMINAL_MIN_HEIGHT = 100;
 constexpr int TERMINAL_MAX_HEIGHT = 600;
 constexpr int TERMINAL_RESIZE_STEP = 50;
 
+constexpr int SCROLLBAR_WIDTH = 14;
+constexpr int SCROLLBAR_MIN_THUMB_HEIGHT = 30;
+
 constexpr int TAB_BAR_HEIGHT = 32;
 constexpr int TAB_PADDING = 12;
 constexpr int TAB_CLOSE_SIZE = 14;
@@ -69,6 +72,11 @@ namespace Colors {
     constexpr SDL_Color SELECTION = {70, 130, 180, 150};
     constexpr SDL_Color OCCURRENCE_HIGHLIGHT = {80, 80, 50, 100};
     constexpr SDL_Color FOLD_INDICATOR = {120, 120, 80, 255};
+
+    constexpr SDL_Color SCROLLBAR_BG = {35, 35, 40, 255};
+    constexpr SDL_Color SCROLLBAR_THUMB = {70, 70, 80, 255};
+    constexpr SDL_Color SCROLLBAR_THUMB_HOVER = {90, 90, 100, 255};
+    constexpr SDL_Color SCROLLBAR_THUMB_ACTIVE = {100, 100, 115, 255};
 
     constexpr SDL_Color SYNTAX_KEYWORD = {198, 120, 221, 255};
     constexpr SDL_Color SYNTAX_TYPE = {86, 182, 194, 255};

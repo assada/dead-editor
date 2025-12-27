@@ -438,9 +438,9 @@ jobs:
           3. Drag DeadEditor to Applications
 
           **Note:** If you see "DeadEditor is damaged and can't be opened", run:
-          \`\`\`bash
+          ```bash
           xattr -cr /Applications/DeadEditor.app
-          \`\`\`
+          ```
           This removes the quarantine attribute from files downloaded from the internet.
 
           EOF

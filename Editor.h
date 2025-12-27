@@ -4,6 +4,7 @@
 #include "Syntax.h"
 #include "LanguageRegistry.h"
 #include "Constants.h"
+#include "Layout.h"
 #include "TextureCache.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
@@ -39,6 +40,12 @@ struct Editor {
     std::vector<SelectionNode> selection_stack;
     std::vector<FoldRegion> fold_regions;
     std::unordered_set<int> folded_lines;
+
+    bool scrollbar_dragging = false;
+    int scrollbar_drag_offset = 0;
+    bool scrollbar_hovered = false;
+    int scaled_scrollbar_width = SCROLLBAR_WIDTH;
+    int scaled_scrollbar_min_thumb = SCROLLBAR_MIN_THUMB_HEIGHT;
 
     std::vector<EditOperation> undo_stack;
     std::vector<EditOperation> redo_stack;
@@ -132,11 +139,17 @@ struct Editor {
     bool is_fold_start_folded(int line) const;
     int get_fold_end_line(int start_line) const;
     void ensure_cursor_not_in_fold();
-    void handle_mouse_click(int x, int y, int x_offset, int y_offset, TTF_Font* font);
+    void handle_mouse_click(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height, TTF_Font* font);
     void handle_mouse_double_click(int x, int y, int x_offset, int y_offset, TTF_Font* font);
-    void handle_mouse_drag(int x, int y, int x_offset, int y_offset, TTF_Font* font);
+    void handle_mouse_drag(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height, TTF_Font* font);
+    void handle_mouse_up();
+    void handle_mouse_move(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height);
     void update_cursor_from_mouse(int x, int y, int x_offset, int y_offset, TTF_Font* font);
     void select_word_at_cursor();
+    int get_total_visible_lines() const;
+    void get_scrollbar_metrics(int visible_height, int min_thumb_height, int& thumb_height, int& thumb_y) const;
+    bool is_point_in_scrollbar(int x, int y, int x_offset, int y_offset, int visible_width, int visible_height) const;
+    void scroll_to_line(int line);
     int get_next_visible_line(int from_line, int direction) const;
 
     void render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& texture_cache,
@@ -144,6 +157,7 @@ struct Editor {
                 int x_offset, int y_offset, int visible_width, int visible_height,
                 int window_w, int char_width,
                 bool has_focus, bool is_file_open, bool cursor_visible,
+                const Layout& layout,
                 std::function<SDL_Color(TokenType)> syntax_color_func);
     void handle_scroll(int wheel_x, int wheel_y, int char_width, bool shift_held);
 

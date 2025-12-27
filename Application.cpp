@@ -489,15 +489,19 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
             if (auto* ed = tab_bar.get_active_editor()) {
                 if (mx >= tree_w && my >= editor_y && my < term_y) {
                     if (is_meta_pressed()) {
-                        ed->update_cursor_from_mouse(mx, my, tree_w, editor_y + layout.padding, font_manager.get());
+                        ed->update_cursor_from_mouse(mx, my, tree_w, editor_y, font_manager.get());
                         ed->go_to_definition();
                     } else if (event.button.clicks == 2) {
-                        ed->handle_mouse_double_click(mx, my, tree_w, editor_y + layout.padding, font_manager.get());
+                        ed->handle_mouse_double_click(mx, my, tree_w, editor_y, font_manager.get());
                     } else {
-                        ed->handle_mouse_click(mx, my, tree_w, editor_y + layout.padding, font_manager.get());
-                        dragging.editor = true;
+                        int ed_visible_w = window_w - tree_w;
+                        int ed_visible_h = term_y - editor_y;
+                        ed->handle_mouse_click(mx, my, tree_w, editor_y, ed_visible_w, ed_visible_h, font_manager.get());
+                        if (!ed->scrollbar_dragging) {
+                            dragging.editor = true;
+                            cursor_moved = true;
+                        }
                     }
-                    cursor_moved = true;
                 }
             }
         }
@@ -505,6 +509,9 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
     }
 
     if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+        if (auto* ed = tab_bar.get_active_editor()) {
+            ed->handle_mouse_up();
+        }
         if (dragging.terminal) { dragging.terminal = false; SDL_SetCursor(cursor_arrow); }
         if (dragging.tree) { dragging.tree = false; SDL_SetCursor(cursor_arrow); }
         if (menu_click_consumed) { menu_click_consumed = false; dragging.editor = false; return; }
@@ -536,12 +543,23 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
             tree_width = std::clamp(motion_x, layout.file_tree_min, layout.file_tree_max);
             return;
         }
-        if (dragging.editor && tab_bar.has_tabs()) {
-            if (auto* ed = tab_bar.get_active_editor()) {
-                ed->handle_mouse_drag(motion_x, motion_y, tree_w, layout.menu_bar_height + tab_h + layout.padding, font_manager.get());
-                cursor_moved = true;
+        if (auto* ed = tab_bar.get_active_editor()) {
+            int editor_y = layout.menu_bar_height + tab_h;
+            int ed_visible_w = window_w - tree_w;
+            int ed_visible_h = term_y - editor_y;
+
+            if (ed->scrollbar_dragging) {
+                ed->handle_mouse_drag(motion_x, motion_y, tree_w, editor_y, ed_visible_w, ed_visible_h, font_manager.get());
+                return;
             }
-            return;
+
+            ed->handle_mouse_move(motion_x, motion_y, tree_w, editor_y, ed_visible_w, ed_visible_h);
+
+            if (dragging.editor) {
+                ed->handle_mouse_drag(motion_x, motion_y, tree_w, editor_y, ed_visible_w, ed_visible_h, font_manager.get());
+                cursor_moved = true;
+                return;
+            }
         }
 
         menu_bar.handle_mouse_motion(motion_x, motion_y);
@@ -594,10 +612,11 @@ void Application::render() {
     if (ed) {
         ed->render(renderer, font_manager.get(), texture_cache,
                   command_bar.get_search_query(),
-                  tree_w, content_y + layout.padding,
-                  window_w - layout.gutter_width - tree_w, content_h - layout.padding,
+                  tree_w, content_y,
+                  window_w - tree_w, content_h,
                   window_w, font_manager.get_char_width(),
                   focus == FocusPanel::Editor, tab_bar.has_tabs(), cursor_visible,
+                  layout,
                   [this](TokenType t) { return get_syntax_color(t); });
     }
 
@@ -780,12 +799,13 @@ void Application::ensure_cursor_visible() {
         int visible = get_content_height() / font_manager.get_line_height();
         ed->ensure_visible(visible);
 
-        int visible_w = window_w - layout.gutter_width - layout.padding * 2;
+        int tree_w = get_tree_width();
+        int visible_w = window_w - tree_w - layout.gutter_width - layout.padding;
         int cursor_px = 0;
         if (ed->cursor_col > 0 && !ed->lines[ed->cursor_line].empty()) {
             TTF_SizeUTF8(font_manager.get(), ed->lines[ed->cursor_line].substr(0, ed->cursor_col).c_str(), &cursor_px, nullptr);
         }
-        ed->ensure_visible_x(cursor_px, visible_w, font_manager.get_char_width() * 4);
+        ed->ensure_visible_x(cursor_px, visible_w, font_manager.get_char_width() * 2);
     }
     cursor_moved = false;
 }
@@ -836,5 +856,5 @@ int Application::get_content_height() const {
     int command_bar_y = terminal_y - cmd_h;
     int tab_h = tab_bar.has_tabs() ? layout.tab_bar_height : 0;
     int content_y = layout.menu_bar_height + tab_h;
-    return command_bar_y - content_y - layout.padding;
+    return command_bar_y - content_y;
 }

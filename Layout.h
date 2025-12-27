@@ -26,6 +26,8 @@ struct Layout {
     int menu_item_padding;
     int menu_dropdown_width;
     int menu_dropdown_item_height;
+    int scrollbar_width;
+    int scrollbar_min_thumb_height;
 
     Layout() { update(1.0f); }
 
@@ -51,6 +53,8 @@ struct Layout {
         menu_item_padding = scaled(MENU_ITEM_PADDING);
         menu_dropdown_width = scaled(MENU_DROPDOWN_WIDTH);
         menu_dropdown_item_height = scaled(MENU_DROPDOWN_ITEM_HEIGHT);
+        scrollbar_width = scaled(SCROLLBAR_WIDTH);
+        scrollbar_min_thumb_height = scaled(SCROLLBAR_MIN_THUMB_HEIGHT);
     }
 
     // Scale any arbitrary value
