@@ -70,15 +70,15 @@ ts_css_proj = subproject('tree-sitter-css')
 ts_css_dep = ts_css_proj.get_variable('tree_sitter_css_dep')
 
 sources = [
-  'main.cpp',
-  'Application.cpp',
-  'Utils.cpp',
-  'Syntax.cpp',
-  'TextureCache.cpp',
-  'FileTree.cpp',
-  'Terminal.cpp',
-  'Editor.cpp',
-  'LanguageRegistry.cpp',
+  'src/main.cpp',
+  'src/Application.cpp',
+  'src/Utils.cpp',
+  'src/Syntax.cpp',
+  'src/TextureCache.cpp',
+  'src/FileTree.cpp',
+  'src/Terminal.cpp',
+  'src/Editor.cpp',
+  'src/LanguageRegistry.cpp',
 ]
 
 dead_editor = executable('DeadEditor',
