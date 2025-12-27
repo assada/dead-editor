@@ -4,6 +4,8 @@
 #include <functional>
 #include <string>
 #include <filesystem>
+#include <expected>
+#include <format>
 #include "Constants.h"
 #include "Utils.h"
 
@@ -34,7 +36,7 @@ private:
             if (std::filesystem::exists(user_font)) {
                 return user_font;
             }
-            
+
             user_font = std::string(home) + "/Library/Fonts/" + FONT_NAME;
             if (std::filesystem::exists(user_font)) {
                 return user_font;
@@ -56,19 +58,19 @@ public:
         }
     }
 
-    bool init(int size) {
+    std::expected<void, std::string> init(int size) {
         font_path_str = find_font_path();
         if (font_path_str.empty()) {
-            SDL_Log("Could not find any suitable font. Searched locations:");
+            std::string error = "Could not find any suitable font. Searched locations:\n";
             char* base_path = SDL_GetBasePath();
             if (base_path) {
-                SDL_Log("  - %s%s (bundled)", base_path, FONT_NAME);
+                error += std::format("  - {}{} (bundled)\n", base_path, FONT_NAME);
                 SDL_free(base_path);
             }
             for (int i = 0; FONT_SEARCH_PATHS[i] != nullptr; i++) {
-                SDL_Log("  - %s", FONT_SEARCH_PATHS[i]);
+                error += std::format("  - {}\n", FONT_SEARCH_PATHS[i]);
             }
-            return false;
+            return std::unexpected(error);
         }
 
         font_size = size;
@@ -76,29 +78,30 @@ public:
         if (font) {
             SDL_Log("Loaded font: %s", font_path_str.c_str());
             update_metrics();
-            return true;
+            return {};
         }
-        return false;
+        return std::unexpected(std::format("Failed to open font: {}", TTF_GetError()));
     }
 
-    bool init(const char* path, int size) {
+    std::expected<void, std::string> init(const char* path, int size) {
         font_path_str = path;
         font_size = size;
         font = TTF_OpenFont(path, size);
         if (font) {
             update_metrics();
-            return true;
+            return {};
         }
-        return false;
+        return std::unexpected(std::format("Failed to open font '{}': {}", path, TTF_GetError()));
     }
 
     void set_on_font_changed(std::function<void()> callback) {
         on_font_changed = std::move(callback);
     }
 
-    bool change_size(int new_size) {
+    std::expected<void, std::string> change_size(int new_size) {
         if (new_size < MIN_FONT_SIZE || new_size > MAX_FONT_SIZE) {
-            return false;
+            return std::unexpected(std::format("Font size {} is out of range [{}, {}]",
+                new_size, MIN_FONT_SIZE, MAX_FONT_SIZE));
         }
         if (TTF_Font* new_font = TTF_OpenFont(font_path_str.c_str(), new_size)) {
             TTF_CloseFont(font);
@@ -108,30 +111,31 @@ public:
             if (on_font_changed) {
                 on_font_changed();
             }
-            return true;
+            return {};
         }
-        return false;
+        return std::unexpected(std::format("Failed to open font at size {}: {}", new_size, TTF_GetError()));
     }
 
     void increase_size() {
         if (font_size < MAX_FONT_SIZE) {
-            change_size(font_size + 2);
+            (void)change_size(font_size + 2);
         }
     }
 
     void decrease_size() {
         if (font_size > MIN_FONT_SIZE) {
-            change_size(font_size - 2);
+            (void)change_size(font_size - 2);
         }
     }
 
     void reset_size() {
-        change_size(DEFAULT_FONT_SIZE);
+        (void)change_size(DEFAULT_FONT_SIZE);
     }
 
     TTF_Font* get() const { return font; }
     int get_size() const { return font_size; }
     int get_line_height() const { return line_height; }
+    int get_terminal_line_height() const { return font ? TTF_FontHeight(font) : line_height; }
     int get_char_width() const { return char_width; }
 
 private:

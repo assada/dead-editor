@@ -68,8 +68,9 @@ void Application::init_systems() {
 }
 
 void Application::init_ui() {
-    if (!font_manager.init(layout.scaled(DEFAULT_FONT_SIZE))) {
-        SDL_Log("Failed to load font: %s", TTF_GetError());
+    auto font_result = font_manager.init(layout.scaled(DEFAULT_FONT_SIZE));
+    if (!font_result) {
+        SDL_Log("Failed to load font: %s", font_result.error().c_str());
         exit(EXIT_FAILURE);
     }
 
@@ -693,7 +694,6 @@ void Application::action_close_tab(int index) {
             update_title();
             focus = FocusPanel::FileTree;
         }
-        texture_cache.invalidate_all();
     }
 }
 
@@ -762,8 +762,8 @@ void Application::toggle_terminal() {
     if (show_terminal) {
         focus_before_terminal = focus;
         if (!terminal.is_running()) {
-            terminal.spawn(window_w - get_tree_width(), terminal_height - layout.padding * 2,
-                          font_manager.get_char_width(), font_manager.get_line_height(),
+            terminal.spawn(window_w - layout.padding * 2, terminal_height - layout.padding * 2,
+                          font_manager.get_char_width(), font_manager.get_terminal_line_height(),
                           &focus, renderer.get(), font_manager.get());
         }
         focus = FocusPanel::Terminal;
@@ -826,10 +826,12 @@ SDL_Color Application::get_syntax_color(TokenType type) {
 void Application::on_font_changed() {
     texture_cache.set_font(font_manager.get());
     tab_bar.set_font(font_manager.get());
+    tab_bar.invalidate_all_caches();
     menu_bar.set_font(font_manager.get());
-    if (auto* ed = tab_bar.get_active_editor()) {
-        ed->set_line_height(font_manager.get_line_height());
-        ed->set_syntax_dirty(true);
+    for (int i = 0; i < tab_bar.get_tab_count(); i++) {
+        if (auto* tab = tab_bar.get_tab_mut(i)) {
+            tab->editor->set_line_height(font_manager.get_line_height());
+        }
     }
 }
 

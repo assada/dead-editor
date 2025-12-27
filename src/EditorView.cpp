@@ -1,6 +1,7 @@
 #include "EditorView.h"
 #include "RenderUtils.h"
 #include <algorithm>
+#include <format>
 
 void EditorView::init_for_file(const std::string& filepath, const TextDocument& doc) {
     clear_caches();
@@ -400,7 +401,6 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
     SDL_Rect gutter_rect = {x_offset, y_offset, GUTTER_WIDTH, visible_height};
     SDL_RenderFillRect(renderer, &gutter_rect);
 
-    char line_num_buf[16];
     for (int i = scroll_y; i < static_cast<int>(doc.lines.size()) && y < visible_end_y; i++) {
         if (is_line_folded(i)) continue;
 
@@ -411,9 +411,9 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
             SDL_RenderFillRect(renderer, &active_gutter_rect);
         }
 
-        snprintf(line_num_buf, sizeof(line_num_buf), "%d", i + 1);
+        std::string line_num = std::format("{}", i + 1);
         SDL_Color num_color = is_cursor_line_flag ? Colors::LINE_NUM_ACTIVE : Colors::LINE_NUM;
-        texture_cache.render_cached_text_right_aligned(line_num_buf, num_color, x_offset + GUTTER_WIDTH - 8, y);
+        texture_cache.render_cached_text_right_aligned(line_num, num_color, x_offset + GUTTER_WIDTH - 8, y);
 
         if (is_fold_start(i)) {
             const char* marker = is_fold_start_folded(i) ? "▶" : "▼";
@@ -560,22 +560,21 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
                     }
                 }
             } else {
-                CachedLineRender& cached = texture_cache.get_or_build_line_render(
-                    i, line_text, tokens, Colors::TEXT, syntax_color_func
+                CachedLineRender& cached = build_line_render(
+                    line_render_cache, i, line_text, tokens, renderer, font, line_height, Colors::TEXT, syntax_color_func
                 );
-                texture_cache.render_cached_line(cached, text_x, y);
+                render_line(cached, renderer, text_x, y);
             }
         }
 
         if (is_fold_start_folded(i)) {
             int fold_end = get_fold_end_line(i);
-            char fold_buf[32];
-            snprintf(fold_buf, sizeof(fold_buf), " ... (%d lines)", fold_end - i);
+            std::string fold_text = std::format(" ... ({} lines)", fold_end - i);
             int line_w = 0;
             if (!doc.lines[i].empty()) {
                 TTF_SizeUTF8(font, doc.lines[i].c_str(), &line_w, nullptr);
             }
-            texture_cache.render_cached_text(fold_buf, Colors::FOLD_INDICATOR, text_x + line_w, y);
+            texture_cache.render_cached_text(fold_text, Colors::FOLD_INDICATOR, text_x + line_w, y);
         }
 
         if (i == cursor_line && cursor_visible && is_file_open && has_focus) {
@@ -622,6 +621,7 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
 void EditorView::clear_caches() {
     token_cache.clear();
     viewport_tokens_buffer.clear();
+    line_render_cache.clear();
     highlight_occurrences.clear();
     highlight_occurrences.shrink_to_fit();
     highlighted_identifier.clear();

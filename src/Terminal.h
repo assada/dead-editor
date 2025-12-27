@@ -1,56 +1,16 @@
 #pragma once
 
 #include "Types.h"
+#include "GlyphCache.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <deque>
 #include <vector>
-#include <unordered_map>
 #include <cstdint>
 
 extern "C" {
     #include <vterm.h>
 }
-
-struct TerminalGlyphCache {
-    struct GlyphKey {
-        uint32_t codepoint;
-        uint32_t color_packed;
-        bool bold;
-
-        bool operator==(const GlyphKey& other) const {
-            return codepoint == other.codepoint && color_packed == other.color_packed && bold == other.bold;
-        }
-    };
-
-    struct GlyphKeyHash {
-        size_t operator()(const GlyphKey& k) const {
-            return std::hash<uint64_t>()(
-                (static_cast<uint64_t>(k.codepoint) << 32) |
-                (static_cast<uint64_t>(k.color_packed) << 1) |
-                static_cast<uint64_t>(k.bold)
-            );
-        }
-    };
-
-    struct CachedGlyph {
-        SDL_Texture* texture = nullptr;
-        int width = 0;
-        int height = 0;
-    };
-
-    std::unordered_map<GlyphKey, CachedGlyph, GlyphKeyHash> cache;
-    SDL_Renderer* renderer = nullptr;
-    TTF_Font* font = nullptr;
-    size_t max_cache_size = 4096;
-
-    void init(SDL_Renderer* r, TTF_Font* f);
-    void clear();
-    ~TerminalGlyphCache();
-
-    static uint32_t pack_color(SDL_Color c);
-    CachedGlyph* get_or_create(uint32_t codepoint, SDL_Color fg, bool bold);
-};
 
 struct ScrollbackCell {
     uint32_t codepoint = 0;
@@ -72,7 +32,7 @@ struct TerminalEmulator {
     int font_height = 0;
     bool needs_redraw = true;
     FocusPanel* current_focus = nullptr;
-    TerminalGlyphCache glyph_cache;
+    GlyphCache glyph_cache;
 
     std::deque<std::vector<ScrollbackCell>> scrollback_buffer;
     int scroll_offset = 0;
@@ -108,6 +68,7 @@ struct TerminalEmulator {
     static int movecursor_callback(VTermPos pos, VTermPos oldpos, int visible, void* user);
     static int bell_callback(void* user);
     static int sb_pushline_callback(int cols, const VTermScreenCell* cells, void* user);
+    static int sb_popline_callback(int cols, VTermScreenCell* cells, void* user);
 
     void spawn(int width, int height, int fw, int fh, FocusPanel* focus_ptr, SDL_Renderer* renderer, TTF_Font* font);
     void resize(int width, int height);

@@ -1,5 +1,4 @@
 #include "Terminal.h"
-#include "HandleTypes.h"
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -10,81 +9,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <format>
 
 #if defined(__APPLE__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #include <util.h>
 #else
 #include <pty.h>
 #endif
-
-void TerminalGlyphCache::init(SDL_Renderer* r, TTF_Font* f) {
-    renderer = r;
-    font = f;
-}
-
-void TerminalGlyphCache::clear() {
-    for (auto& [key, glyph] : cache) {
-        if (glyph.texture) {
-            SDL_DestroyTexture(glyph.texture);
-        }
-    }
-    cache.clear();
-}
-
-TerminalGlyphCache::~TerminalGlyphCache() {
-    clear();
-}
-
-uint32_t TerminalGlyphCache::pack_color(SDL_Color c) {
-    return (static_cast<uint32_t>(c.r) << 16) | (static_cast<uint32_t>(c.g) << 8) | static_cast<uint32_t>(c.b);
-}
-
-TerminalGlyphCache::CachedGlyph* TerminalGlyphCache::get_or_create(uint32_t codepoint, SDL_Color fg, bool bold) {
-    GlyphKey key{codepoint, pack_color(fg), bold};
-
-    auto it = cache.find(key);
-    if (it != cache.end()) {
-        return &it->second;
-    }
-
-    if (cache.size() >= max_cache_size) {
-        auto oldest = cache.begin();
-        if (oldest->second.texture) {
-            SDL_DestroyTexture(oldest->second.texture);
-        }
-        cache.erase(oldest);
-    }
-
-    char utf8[8] = {0};
-    int len = 0;
-    if (codepoint < 0x80) {
-        utf8[len++] = static_cast<char>(codepoint);
-    } else if (codepoint < 0x800) {
-        utf8[len++] = static_cast<char>(0xC0 | (codepoint >> 6));
-        utf8[len++] = static_cast<char>(0x80 | (codepoint & 0x3F));
-    } else if (codepoint < 0x10000) {
-        utf8[len++] = static_cast<char>(0xE0 | (codepoint >> 12));
-        utf8[len++] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-        utf8[len++] = static_cast<char>(0x80 | (codepoint & 0x3F));
-    } else {
-        utf8[len++] = static_cast<char>(0xF0 | (codepoint >> 18));
-        utf8[len++] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
-        utf8[len++] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-        utf8[len++] = static_cast<char>(0x80 | (codepoint & 0x3F));
-    }
-    utf8[len] = '\0';
-
-    CachedGlyph glyph;
-    SurfacePtr surf(TTF_RenderUTF8_Blended(font, utf8, fg));
-    if (surf) {
-        glyph.texture = SDL_CreateTextureFromSurface(renderer, surf.get());
-        glyph.width = surf->w;
-        glyph.height = surf->h;
-    }
-
-    auto [inserted_it, success] = cache.emplace(key, glyph);
-    return &inserted_it->second;
-}
 
 TerminalEmulator::~TerminalEmulator() {
     destroy();
@@ -155,6 +86,37 @@ int TerminalEmulator::sb_pushline_callback(int cols, const VTermScreenCell* cell
     return 1;
 }
 
+int TerminalEmulator::sb_popline_callback(int cols, VTermScreenCell* cells, void* user) {
+    auto* self = static_cast<TerminalEmulator*>(user);
+
+    if (self->scrollback_buffer.empty()) {
+        return 0;
+    }
+
+    const auto& line = self->scrollback_buffer.back();
+
+    for (int i = 0; i < cols; i++) {
+        memset(&cells[i], 0, sizeof(VTermScreenCell));
+        cells[i].width = 1;
+
+        if (i < static_cast<int>(line.size())) {
+            const auto& sc = line[i];
+            cells[i].chars[0] = sc.codepoint;
+            cells[i].width = sc.width;
+            cells[i].attrs.bold = sc.bold ? 1 : 0;
+            cells[i].attrs.reverse = sc.reverse ? 1 : 0;
+            vterm_color_rgb(&cells[i].fg, sc.fg.r, sc.fg.g, sc.fg.b);
+            vterm_color_rgb(&cells[i].bg, sc.bg.r, sc.bg.g, sc.bg.b);
+        } else {
+            vterm_color_rgb(&cells[i].fg, self->default_fg.r, self->default_fg.g, self->default_fg.b);
+            vterm_color_rgb(&cells[i].bg, self->default_bg.r, self->default_bg.g, self->default_bg.b);
+        }
+    }
+
+    self->scrollback_buffer.pop_back();
+    return 1;
+}
+
 void TerminalEmulator::spawn(int width, int height, int fw, int fh, FocusPanel* focus_ptr, SDL_Renderer* renderer, TTF_Font* font) {
     font_width = fw;
     font_height = fh;
@@ -181,6 +143,7 @@ void TerminalEmulator::spawn(int width, int height, int fw, int fh, FocusPanel* 
     screen_callbacks.movecursor = movecursor_callback;
     screen_callbacks.bell = bell_callback;
     screen_callbacks.sb_pushline = sb_pushline_callback;
+    screen_callbacks.sb_popline = sb_popline_callback;
     vterm_screen_set_callbacks(screen, &screen_callbacks, this);
 
     vterm_screen_enable_altscreen(screen, 1);
@@ -395,10 +358,10 @@ void TerminalEmulator::render(SDL_Renderer* renderer, TTF_Font* font, int x, int
                     render_fg.b = static_cast<uint8_t>(std::min(255, render_fg.b + 50));
                 }
 
-                auto* glyph = glyph_cache.get_or_create(codepoint, render_fg, bold);
+                auto* glyph = glyph_cache.get_or_create(codepoint, render_fg, bold ? 1 : 0);
                 if (glyph && glyph->texture) {
                     SDL_Rect dst = {draw_x, draw_y, glyph->width, glyph->height};
-                    SDL_RenderCopy(renderer, glyph->texture, nullptr, &dst);
+                    SDL_RenderCopy(renderer, glyph->texture.get(), nullptr, &dst);
                 }
             }
 
@@ -410,17 +373,15 @@ void TerminalEmulator::render(SDL_Renderer* renderer, TTF_Font* font, int x, int
     }
 
     if (scroll_offset > 0) {
-        char scroll_buf[32];
-        snprintf(scroll_buf, sizeof(scroll_buf), "[%d/%d]", scroll_offset, total_history);
+        std::string scroll_text = std::format("[{}/{}]", scroll_offset, total_history);
         SDL_Color info_color = {150, 150, 150, 255};
-        int info_x = x + width - static_cast<int>(strlen(scroll_buf)) * font_width - 5;
+        int info_x = x + width - static_cast<int>(scroll_text.size()) * font_width - 5;
         int info_y = y + 2;
-        for (const char* p = scroll_buf; *p; ++p) {
-            char c = *p;
-            auto* g = glyph_cache.get_or_create(static_cast<uint32_t>(c), info_color, false);
+        for (char c : scroll_text) {
+            auto* g = glyph_cache.get_or_create(static_cast<uint32_t>(c), info_color);
             if (g && g->texture) {
                 SDL_Rect dst = {info_x, info_y, g->width, g->height};
-                SDL_RenderCopy(renderer, g->texture, nullptr, &dst);
+                SDL_RenderCopy(renderer, g->texture.get(), nullptr, &dst);
                 info_x += font_width;
             }
         }

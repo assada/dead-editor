@@ -3,7 +3,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <string>
-#include <cstdio>
+#include <format>
 #include <functional>
 #include "Types.h"
 #include "Constants.h"
@@ -254,12 +254,12 @@ public:
         SDL_RenderFillRect(renderer, &bar);
 
         int text_y = y + (L->search_bar_height - line_height) / 2;
-        const char* label = get_label_buf();
+        const std::string& label = get_label();
         texture_cache.render_cached_text(label, Colors::TEXT, x + L->padding, text_y);
 
         if (cursor_visible && mode != CommandMode::Delete && mode != CommandMode::SavePrompt) {
             int label_w = 0;
-            TTF_SizeUTF8(font, label, &label_w, nullptr);
+            TTF_SizeUTF8(font, label.c_str(), &label_w, nullptr);
             SDL_SetRenderDrawColor(renderer, Colors::CURSOR.r, Colors::CURSOR.g, Colors::CURSOR.b, 255);
             SDL_Rect cursor = {x + L->padding + label_w, text_y, L->scaled(2), line_height};
             SDL_RenderFillRect(renderer, &cursor);
@@ -273,46 +273,44 @@ public:
         SDL_Rect status_bar = {x, y, width, L->status_bar_height};
         SDL_RenderFillRect(renderer, &status_bar);
 
-        char status_buf[512];
-        const char* filename = status.file_path.empty() ? "Untitled" : status.file_path.c_str();
-        snprintf(status_buf, sizeof(status_buf), "%s%s    Ln %d/%d    Col %d",
-                 filename, status.modified ? " *" : "",
-                 status.cursor_pos.line + 1, status.total_lines, status.cursor_pos.col + 1);
+        std::string status_text = std::format("{}{}    Ln {}/{}    Col {}",
+            status.file_path.empty() ? "Untitled" : status.file_path.c_str(),
+            status.modified ? " *" : "",
+            status.cursor_pos.line + 1, status.total_lines, status.cursor_pos.col + 1);
 
         int text_y = y + (L->status_bar_height - line_height) / 2;
-        texture_cache.render_cached_text(status_buf, Colors::LINE_NUM, x + L->padding, text_y);
+        texture_cache.render_cached_text(status_text, Colors::LINE_NUM, x + L->padding, text_y);
 
         if (!git_branch.empty()) {
-            char branch_buf[128];
-            snprintf(branch_buf, sizeof(branch_buf), " %s", git_branch.c_str());
-            texture_cache.render_cached_text_right_aligned(branch_buf, Colors::GIT_BRANCH, x + width - L->padding, text_y);
+            std::string branch_text = std::format(" {}", git_branch);
+            texture_cache.render_cached_text_right_aligned(branch_text, Colors::GIT_BRANCH, x + width - L->padding, text_y);
         }
     }
 
 private:
-    mutable char label_buf[256];
+    mutable std::string label_cache;
 
-    const char* get_label_buf() const {
+    const std::string& get_label() const {
         switch (mode) {
             case CommandMode::Search:
-                snprintf(label_buf, sizeof(label_buf), "Find: %s", input.c_str());
+                label_cache = std::format("Find: {}", input);
                 break;
             case CommandMode::GoTo:
-                snprintf(label_buf, sizeof(label_buf), "Go to (line:col): %s", input.c_str());
+                label_cache = std::format("Go to (line:col): {}", input);
                 break;
             case CommandMode::Create:
-                snprintf(label_buf, sizeof(label_buf), "New: %s", input.c_str());
+                label_cache = std::format("New: {}", input);
                 break;
             case CommandMode::Delete:
-                snprintf(label_buf, sizeof(label_buf), "Delete '%s'? (y/n)", target_name.c_str());
+                label_cache = std::format("Delete '{}'? (y/n)", target_name);
                 break;
             case CommandMode::SavePrompt:
-                snprintf(label_buf, sizeof(label_buf), "Save changes to '%s'? (y)es / (n)o / (c)ancel", target_name.c_str());
+                label_cache = std::format("Save changes to '{}'? (y)es / (n)o / (c)ancel", target_name);
                 break;
             default:
-                label_buf[0] = '\0';
+                label_cache.clear();
                 break;
         }
-        return label_buf;
+        return label_cache;
     }
 };

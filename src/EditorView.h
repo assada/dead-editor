@@ -27,6 +27,7 @@ public:
     SyntaxHighlighter highlighter;
     std::unordered_map<size_t, std::vector<Token>> token_cache;
     std::unordered_map<LineIdx, std::vector<Token>> viewport_tokens_buffer;
+    LineRenderCache line_render_cache{300};
 
     std::vector<HighlightRange> highlight_occurrences;
     std::string highlighted_identifier;

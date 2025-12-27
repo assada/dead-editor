@@ -216,6 +216,15 @@ public:
         }
     }
 
+    void invalidate_all_caches() {
+        for (auto& tab : tabs) {
+            if (tab.editor) {
+                tab.editor->view.clear_caches();
+                tab.editor->set_syntax_dirty(true);
+            }
+        }
+    }
+
     TabClickResult handle_mouse_click(int mouse_x, int mouse_y) {
         TabClickResult result;
 
