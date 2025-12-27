@@ -1,4 +1,4 @@
-- [ ] Fix go to def scroll (s)
+- [x] Fix go to def scroll (s)
 - [x] Update git statuses in background (s)
 - [x] Resize file tree widht (s)
 - [x] Copy/Paste in terminal
