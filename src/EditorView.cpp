@@ -473,8 +473,9 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
             }
 
             if (i >= s_line && i <= e_line) {
-                int line_start = (i == s_line) ? s_col : 0;
-                int line_end = (i == e_line) ? e_col : static_cast<int>(doc.lines[i].size());
+                int line_len = static_cast<int>(doc.lines[i].size());
+                int line_start = (i == s_line) ? std::min(s_col, line_len) : 0;
+                int line_end = (i == e_line) ? std::min(e_col, line_len) : line_len;
                 int x_start = text_x;
                 if (line_start > 0) {
                     int w = 0;
@@ -485,7 +486,7 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
                 if (line_end > line_start) {
                     TTF_SizeUTF8(font, doc.lines[i].substr(line_start, line_end - line_start).c_str(), &sel_w, nullptr);
                 }
-                if (i < e_line && line_end == static_cast<int>(doc.lines[i].size())) {
+                if (i < e_line) {
                     sel_w += char_width;
                 }
                 if (sel_w > 0) {

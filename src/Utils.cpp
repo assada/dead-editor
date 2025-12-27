@@ -167,6 +167,15 @@ ColIdx utf8_next_char_pos(const std::string& str, ColIdx pos) {
     return std::min(pos + len, static_cast<ColIdx>(str.size()));
 }
 
+ColIdx utf8_clamp_to_char_boundary(const std::string& str, ColIdx pos) {
+    int len = static_cast<int>(str.size());
+    if (pos >= len) return len;
+    while (pos > 0 && (str[pos] & 0xC0) == 0x80) {
+        pos--;
+    }
+    return pos;
+}
+
 uint32_t utf8_decode_at(const std::string& str, ColIdx pos) {
     if (pos < 0 || pos >= static_cast<ColIdx>(str.size())) return 0;
     unsigned char c = static_cast<unsigned char>(str[pos]);
@@ -252,4 +261,40 @@ std::string get_resource_path(const std::string& filename) {
     }
 
     return direct_path;
+}
+
+std::string get_config_path(const std::string& filename) {
+    std::string config_dir;
+
+#ifdef __APPLE__
+    const char* home = getenv("HOME");
+    if (home) {
+        config_dir = std::string(home) + "/Library/Application Support/DeadEditor";
+    }
+#elif defined(__linux__)
+    const char* xdg_config = getenv("XDG_CONFIG_HOME");
+    if (xdg_config && xdg_config[0]) {
+        config_dir = std::string(xdg_config) + "/DeadEditor";
+    } else {
+        const char* home = getenv("HOME");
+        if (home) {
+            config_dir = std::string(home) + "/.config/DeadEditor";
+        }
+    }
+#else
+    const char* appdata = getenv("APPDATA");
+    if (appdata) {
+        config_dir = std::string(appdata) + "/DeadEditor";
+    }
+#endif
+
+    if (config_dir.empty()) {
+        return filename;
+    }
+
+    if (!std::filesystem::exists(config_dir)) {
+        std::filesystem::create_directories(config_dir);
+    }
+
+    return config_dir + "/" + filename;
 }

@@ -8,6 +8,7 @@ builddir/
 .env.development.local
 .env.test.local
 .env.production.local
+.keybindings.example.json
 
 .cache/
 tests/

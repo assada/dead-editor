@@ -2,6 +2,7 @@
 
 #include <SDL2/SDL.h>
 #include <string>
+#include <memory>
 
 #include "HandleTypes.h"
 #include "Layout.h"
@@ -13,6 +14,11 @@
 #include "CommandBar.h"
 #include "MenuBar.h"
 #include "Types.h"
+#include "InputMapper.h"
+#include "ActionRegistry.h"
+#include "EditorActions.h"
+#include "AppActions.h"
+#include "FileTreeActions.h"
 
 class Application {
 public:
@@ -34,8 +40,10 @@ private:
     void dispatch_text_input(const SDL_Event& event);
     void handle_window_resize(const SDL_Event& event);
 
-    void handle_global_shortcuts(const SDL_Event& event, SDL_Keycode key, bool ctrl, bool shift);
     void handle_command_bar_key(const SDL_Event& event);
+    void setup_keybindings();
+    void setup_actions();
+    InputContext get_current_input_context() const;
 
     bool action_open_file(const std::string& path);
     void action_open_folder(const std::string& path);
@@ -96,4 +104,10 @@ private:
 
     Uint32 last_blink = 0;
     bool cursor_visible = true;
+
+    InputMapper input_mapper;
+    ActionRegistry action_registry;
+    std::unique_ptr<EditorActions> editor_actions_;
+    std::unique_ptr<AppActions> app_actions_;
+    std::unique_ptr<FileTreeActions> filetree_actions_;
 };

@@ -452,10 +452,7 @@ void EditorController::move_up(const TextDocument& doc, const EditorView& view) 
         int new_line = view.get_next_visible_line(cursor_line, -1, doc);
         if (new_line != cursor_line) {
             cursor_line = new_line;
-            cursor_col = std::min(cursor_col, static_cast<int>(doc.lines[cursor_line].size()));
-            while (cursor_col > 0 && (doc.lines[cursor_line][cursor_col] & 0xC0) == 0x80) {
-                cursor_col--;
-            }
+            cursor_col = utf8_clamp_to_char_boundary(doc.lines[cursor_line], cursor_col);
         }
     }
 }
@@ -465,10 +462,7 @@ void EditorController::move_down(const TextDocument& doc, const EditorView& view
         int new_line = view.get_next_visible_line(cursor_line, 1, doc);
         if (new_line != cursor_line) {
             cursor_line = new_line;
-            cursor_col = std::min(cursor_col, static_cast<int>(doc.lines[cursor_line].size()));
-            while (cursor_col > 0 && (doc.lines[cursor_line][cursor_col] & 0xC0) == 0x80) {
-                cursor_col--;
-            }
+            cursor_col = utf8_clamp_to_char_boundary(doc.lines[cursor_line], cursor_col);
         }
     }
 }
@@ -483,18 +477,12 @@ void EditorController::move_end(const TextDocument& doc) {
 
 void EditorController::move_page_up(const TextDocument& doc, int visible_lines) {
     cursor_line = std::max(0, cursor_line - visible_lines);
-    cursor_col = std::min(cursor_col, static_cast<int>(doc.lines[cursor_line].size()));
-    while (cursor_col > 0 && (doc.lines[cursor_line][cursor_col] & 0xC0) == 0x80) {
-        cursor_col--;
-    }
+    cursor_col = utf8_clamp_to_char_boundary(doc.lines[cursor_line], cursor_col);
 }
 
 void EditorController::move_page_down(const TextDocument& doc, int visible_lines) {
     cursor_line = std::min(static_cast<int>(doc.lines.size()) - 1, cursor_line + visible_lines);
-    cursor_col = std::min(cursor_col, static_cast<int>(doc.lines[cursor_line].size()));
-    while (cursor_col > 0 && (doc.lines[cursor_line][cursor_col] & 0xC0) == 0x80) {
-        cursor_col--;
-    }
+    cursor_col = utf8_clamp_to_char_boundary(doc.lines[cursor_line], cursor_col);
 }
 
 void EditorController::move_line_up(TextDocument& doc, EditorView& view) {
@@ -595,10 +583,7 @@ void EditorController::delete_word_right(TextDocument& doc, EditorView& view) {
 
 void EditorController::go_to(const TextDocument& doc, TextPos pos) {
     cursor_line = std::max(0, std::min(pos.line - 1, static_cast<int>(doc.lines.size()) - 1));
-    cursor_col = std::max(0, std::min(pos.col > 0 ? pos.col - 1 : 0, static_cast<int>(doc.lines[cursor_line].size())));
-    while (cursor_col > 0 && (doc.lines[cursor_line][cursor_col] & 0xC0) == 0x80) {
-        cursor_col--;
-    }
+    cursor_col = utf8_clamp_to_char_boundary(doc.lines[cursor_line], pos.col > 0 ? pos.col - 1 : 0);
     clear_selection();
 }
 
@@ -657,7 +642,7 @@ void EditorController::select_word_at_cursor(const TextDocument& doc) {
     if (line.empty()) return;
 
     int line_len = static_cast<int>(line.size());
-    if (cursor_col >= line_len) cursor_col = line_len > 0 ? line_len - 1 : 0;
+    if (cursor_col >= line_len) cursor_col = utf8_prev_char_start(line, line_len);
 
     if (!is_word_char_at(line, cursor_col)) {
         sel_start_line = cursor_line;
@@ -1097,7 +1082,7 @@ void EditorController::ensure_cursor_not_in_fold(const TextDocument& doc, const 
     for (const auto& fr : view.fold_regions) {
         if (fr.folded && cursor_line > fr.start_line && cursor_line <= fr.end_line) {
             cursor_line = fr.start_line;
-            cursor_col = std::min(cursor_col, static_cast<ColIdx>(doc.lines[cursor_line].size()));
+            cursor_col = utf8_clamp_to_char_boundary(doc.lines[cursor_line], cursor_col);
             return;
         }
     }
@@ -1144,7 +1129,9 @@ void EditorController::update_cursor_from_mouse(int x, int y, int x_offset, int 
         int best_col = 0;
         int best_diff = click_x;
 
-        for (size_t col = 1; col <= line.size(); col++) {
+        size_t col = 0;
+        while (col < line.size()) {
+            col = utf8_next_char_pos(line, col);
             int w = 0;
             TTF_SizeUTF8(font, line.substr(0, col).c_str(), &w, nullptr);
             int diff = std::abs(click_x - w);
@@ -1240,196 +1227,6 @@ void EditorController::reset_state() {
     in_undo_group = false;
 }
 
-EditorController::KeyResult EditorController::handle_key(const SDL_Event& event, int visible_lines, TextDocument& doc, EditorView& view) {
-    KeyResult result;
-    if (doc.readonly) return result;
-
-    bool ctrl = (event.key.keysym.mod & META_MOD) != 0;
-    bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-    bool alt = (event.key.keysym.mod & KMOD_ALT) != 0;
-
-    switch (event.key.keysym.sym) {
-        case SDLK_RETURN:
-            clear_selection();
-            reset_selection_stack();
-            new_line(doc, view);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_BACKSPACE:
-            reset_selection_stack();
-            if (ctrl) delete_word_left(doc, view);
-            else backspace(doc, view);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_DELETE:
-            reset_selection_stack();
-            if (ctrl) delete_word_right(doc, view);
-            else delete_char(doc, view);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_LEFT:
-            if (shift) start_selection();
-            else clear_selection();
-            reset_selection_stack();
-            if (ctrl) move_word_left(doc);
-            else move_left(doc);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_RIGHT:
-            if (shift) start_selection();
-            else clear_selection();
-            reset_selection_stack();
-            if (ctrl) move_word_right(doc);
-            else move_right(doc);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_UP:
-            if (alt) {
-                move_line_up(doc, view);
-            } else {
-                if (shift) start_selection();
-                else clear_selection();
-                reset_selection_stack();
-                move_up(doc, view);
-            }
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_DOWN:
-            if (alt) {
-                move_line_down(doc, view);
-            } else {
-                if (shift) start_selection();
-                else clear_selection();
-                reset_selection_stack();
-                move_down(doc, view);
-            }
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_HOME:
-            if (shift) start_selection();
-            else clear_selection();
-            reset_selection_stack();
-            move_home();
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_END:
-            if (shift) start_selection();
-            else clear_selection();
-            reset_selection_stack();
-            move_end(doc);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_PAGEUP:
-            if (shift) start_selection();
-            else clear_selection();
-            move_page_up(doc, visible_lines);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_PAGEDOWN:
-            if (shift) start_selection();
-            else clear_selection();
-            move_page_down(doc, visible_lines);
-            result.consumed = result.cursor_moved = true;
-            break;
-        case SDLK_a:
-            if (ctrl) {
-                select_all(doc);
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_c:
-            if (ctrl && has_selection()) {
-                SDL_SetClipboardText(get_selected_text(doc).c_str());
-                result.consumed = true;
-            }
-            break;
-        case SDLK_x:
-            if (ctrl && has_selection()) {
-                SDL_SetClipboardText(get_selected_text(doc).c_str());
-                delete_selection(doc, view);
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_v:
-            if (ctrl && SDL_HasClipboardText()) {
-                char* clipboard = SDL_GetClipboardText();
-                begin_undo_group();
-                insert_text(doc, view, clipboard);
-                end_undo_group();
-                SDL_free(clipboard);
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_d:
-            if (ctrl) {
-                duplicate_line(doc, view);
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_z:
-            if (ctrl && shift) {
-                if (redo(doc, view)) result.cursor_moved = true;
-                result.consumed = true;
-            } else if (ctrl) {
-                if (undo(doc, view)) result.cursor_moved = true;
-                result.consumed = true;
-            }
-            break;
-        case SDLK_y:
-            if (ctrl) {
-                if (redo(doc, view)) result.cursor_moved = true;
-                result.consumed = true;
-            }
-            break;
-        case SDLK_SLASH:
-            if (ctrl) {
-                toggle_comment(doc, view);
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_TAB:
-            if (!ctrl) {
-                insert_text(doc, view, "    ");
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_F12:
-            if (go_to_definition(doc, view)) {
-                result.cursor_moved = true;
-            }
-            result.consumed = true;
-            break;
-        case SDLK_w:
-            if (ctrl && shift) {
-                shrink_selection();
-                result.consumed = result.cursor_moved = true;
-            } else if (ctrl) {
-                expand_selection(doc, view);
-                result.consumed = result.cursor_moved = true;
-            }
-            break;
-        case SDLK_LEFTBRACKET:
-            if (ctrl && shift) {
-                if (toggle_fold_at_cursor(view)) {
-                    ensure_cursor_not_in_fold(doc, view);
-                }
-                result.consumed = true;
-            }
-            break;
-        case SDLK_RIGHTBRACKET:
-            if (ctrl && shift) {
-                view.unfold_all();
-                result.consumed = true;
-            }
-            break;
-        case SDLK_k:
-            if (ctrl && shift) {
-                view.fold_all();
-                ensure_cursor_not_in_fold(doc, view);
-                result.consumed = true;
-            }
-            break;
-    }
-
-    return result;
+EditorController::KeyResult EditorController::handle_key(const SDL_Event& /* event */, int /* visible_lines */, TextDocument& /* doc */, EditorView& /* view */) {
+    return {};
 }

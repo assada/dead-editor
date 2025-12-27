@@ -123,6 +123,7 @@ struct FileTree {
     bool is_loaded() const;
     FileTreeInputResult handle_key_event(const SDL_Event& event, int visible_lines, bool file_is_open);
     bool handle_text_input(const char* text);
+    bool handle_text_input_key(const SDL_Event& event);
     void handle_mouse_click(int x, int y, int line_height);
     std::string handle_mouse_double_click(int x, int y, int line_height);
     void handle_scroll(int wheel_y, int visible_lines);

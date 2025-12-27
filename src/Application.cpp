@@ -1,6 +1,7 @@
 #include "Application.h"
 #include "Utils.h"
 #include "LanguageRegistry.h"
+#include "KeybindingsLoader.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -87,6 +88,8 @@ void Application::init_ui() {
     tree_width = layout.file_tree_width;
 
     command_bar.set_layout(&layout);
+
+    setup_actions();
 
     menu_bar.set_context({
         .save_file = [this]() { action_save_current(); },
@@ -205,39 +208,28 @@ void Application::dispatch_text_input(const SDL_Event& event) {
 void Application::dispatch_key_event(const SDL_Event& event) {
     reset_cursor_blink();
 
-    bool ctrl = (event.key.keysym.mod & META_MOD) != 0;
-    bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-    SDL_Keycode key = event.key.keysym.sym;
-
     if (command_bar.is_active()) {
         handle_command_bar_key(event);
         return;
     }
 
-    if (key == SDLK_F5) {
-        toggle_terminal();
+    InputContext context = get_current_input_context();
+
+    if (show_terminal && context == InputContext::Terminal) {
+        auto result = action_registry.try_execute(event.key, input_mapper, InputContext::Terminal);
+        if (result.consumed) return;
+    }
+
+    auto result = action_registry.try_execute(event.key, input_mapper, context);
+    if (result.consumed) {
+        if (result.cursor_moved) cursor_moved = true;
         return;
     }
 
-    if (show_terminal && ctrl && shift) {
-        if (key == SDLK_UP) {
-            terminal_height = std::min(terminal_height + layout.terminal_resize_step,
-                                       std::min(layout.terminal_max, window_h - layout.status_bar_height - layout.scaled(100)));
-            if (terminal.is_running()) terminal.resize(window_w - layout.padding * 2, terminal_height - layout.padding * 2);
-            return;
-        }
-        if (key == SDLK_DOWN) {
-            terminal_height = std::max(terminal_height - layout.terminal_resize_step, layout.terminal_min);
-            if (terminal.is_running()) terminal.resize(window_w - layout.padding * 2, terminal_height - layout.padding * 2);
-            return;
-        }
-        if (key == SDLK_v && focus == FocusPanel::Terminal) {
-            if (char* clipboard = SDL_GetClipboardText()) {
-                if (clipboard[0]) terminal.write_input(clipboard);
-                SDL_free(clipboard);
-            }
-            return;
-        }
+    result = action_registry.try_execute(event.key, input_mapper, InputContext::Global);
+    if (result.consumed) {
+        if (result.cursor_moved) cursor_moved = true;
+        return;
     }
 
     if (focus == FocusPanel::Terminal && show_terminal) {
@@ -245,118 +237,112 @@ void Application::dispatch_key_event(const SDL_Event& event) {
         return;
     }
 
-    handle_global_shortcuts(event, key, ctrl, shift);
+    if (focus == FocusPanel::FileTree && file_tree.is_loaded()) {
+        if (file_tree.handle_text_input_key(event)) {
+            return;
+        }
+    }
 }
 
-void Application::handle_global_shortcuts(const SDL_Event& event, SDL_Keycode key, bool ctrl, bool shift) {
-    if (ctrl && key == SDLK_e) {
-        toggle_focus();
-        return;
+InputContext Application::get_current_input_context() const {
+    if (command_bar.is_active()) return InputContext::CommandBar;
+    switch (focus) {
+        case FocusPanel::Editor: return InputContext::Editor;
+        case FocusPanel::FileTree: return InputContext::FileTree;
+        case FocusPanel::Terminal: return InputContext::Terminal;
     }
+    return InputContext::Global;
+}
 
-    if (ctrl && key == SDLK_BACKQUOTE && show_terminal) {
-        focus = FocusPanel::Terminal;
-        return;
-    }
+void Application::setup_actions() {
+    editor_actions_ = std::make_unique<EditorActions>(action_registry, input_mapper);
+    editor_actions_->register_all(
+        [this]() -> Editor* { return tab_bar.get_active_editor(); },
+        [this]() -> int { return get_content_height() / font_manager.get_line_height(); }
+    );
 
-    if (focus == FocusPanel::FileTree) {
-        int visible = get_content_height() / font_manager.get_line_height();
-        auto result = file_tree.handle_key_event(event, visible, tab_bar.has_tabs());
-        if (result.consumed) {
-            switch (result.action) {
-                case FileTreeAction::OpenFile:
-                    if (action_open_file(result.path)) cursor_moved = true;
-                    break;
-                case FileTreeAction::FocusEditor:
-                    focus = FocusPanel::Editor;
-                    break;
-                case FileTreeAction::Exit:
-                    running = false;
-                    break;
-                case FileTreeAction::StartCreate:
-                    command_bar.start_create(result.path);
-                    break;
-                case FileTreeAction::StartDelete:
-                    command_bar.start_delete(result.path, result.name);
-                    break;
-                default:
-                    break;
-            }
-        }
-        return;
-    }
-
-    if (focus == FocusPanel::Editor) {
-        if (ctrl && key == SDLK_q) {
-            running = false;
-            return;
-        }
-
-        if (ctrl && key == SDLK_s) {
-            action_save_current();
-            return;
-        }
-        if (ctrl && key == SDLK_f) {
-            command_bar.start_search();
-            return;
-        }
-        if (ctrl && key == SDLK_g) {
-            command_bar.start_goto();
-            return;
-        }
-        if (key == SDLK_F3 && !command_bar.get_search_query().empty()) {
+    app_actions_ = std::make_unique<AppActions>(action_registry, input_mapper);
+    app_actions_->register_all({
+        .save_current = [this]() { action_save_current(); },
+        .start_search = [this]() { command_bar.start_search(); },
+        .start_goto = [this]() { command_bar.start_goto(); },
+        .find_next = [this](const std::string& query, TextPos start) {
             if (auto* ed = tab_bar.get_active_editor()) {
-                int next_col = ed->get_cursor_col() + static_cast<int>(command_bar.get_search_query().size());
-                if (ed->find_next(command_bar.get_search_query(), {ed->get_cursor_line(), next_col})) {
-                    cursor_moved = true;
-                }
+                if (ed->find_next(query, start)) cursor_moved = true;
             }
-            return;
-        }
-        if (ctrl && (key == SDLK_PLUS || key == SDLK_KP_PLUS || key == SDLK_EQUALS)) {
-            font_manager.increase_size();
-            return;
-        }
-        if (ctrl && (key == SDLK_MINUS || key == SDLK_KP_MINUS)) {
-            font_manager.decrease_size();
-            return;
-        }
-        if (ctrl && (key == SDLK_0 || key == SDLK_KP_0)) {
-            font_manager.reset_size();
-            return;
-        }
-        if (ctrl && shift && key == SDLK_TAB) {
-            tab_bar.prev_tab();
-            tab_bar.ensure_tab_visible(window_w - get_tree_width());
-            if (auto* ed = tab_bar.get_active_editor()) {
-                update_title(ed->get_file_path());
-                texture_cache.invalidate_all();
-                cursor_moved = true;
-            }
-            return;
-        }
-        if (ctrl && key == SDLK_TAB) {
+        },
+        .get_search_query = [this]() { return command_bar.get_search_query(); },
+        .get_cursor_pos = [this]() -> TextPos {
+            if (auto* ed = tab_bar.get_active_editor()) return ed->cursor_pos();
+            return {};
+        },
+        .toggle_focus = [this]() { toggle_focus(); },
+        .focus_terminal = [this]() {
+            if (show_terminal) focus = FocusPanel::Terminal;
+        },
+        .toggle_terminal = [this]() { toggle_terminal(); },
+        .next_tab = [this]() {
             tab_bar.next_tab();
             tab_bar.ensure_tab_visible(window_w - get_tree_width());
             if (auto* ed = tab_bar.get_active_editor()) {
                 update_title(ed->get_file_path());
                 texture_cache.invalidate_all();
-                cursor_moved = true;
             }
-            return;
-        }
-        if (ctrl && key == SDLK_F4) {
+        },
+        .prev_tab = [this]() {
+            tab_bar.prev_tab();
+            tab_bar.ensure_tab_visible(window_w - get_tree_width());
+            if (auto* ed = tab_bar.get_active_editor()) {
+                update_title(ed->get_file_path());
+                texture_cache.invalidate_all();
+            }
+        },
+        .close_active_tab = [this]() {
             int active = tab_bar.get_active_index();
             if (active >= 0) action_close_tab(active);
-            return;
-        }
+        },
+        .zoom_in = [this]() { font_manager.increase_size(); },
+        .zoom_out = [this]() { font_manager.decrease_size(); },
+        .zoom_reset = [this]() { font_manager.reset_size(); },
+        .terminal_resize_up = [this]() {
+            terminal_height = std::min(terminal_height + layout.terminal_resize_step,
+                                       std::min(layout.terminal_max, window_h - layout.status_bar_height - layout.scaled(100)));
+            if (terminal.is_running()) terminal.resize(window_w - layout.padding * 2, terminal_height - layout.padding * 2);
+        },
+        .terminal_resize_down = [this]() {
+            terminal_height = std::max(terminal_height - layout.terminal_resize_step, layout.terminal_min);
+            if (terminal.is_running()) terminal.resize(window_w - layout.padding * 2, terminal_height - layout.padding * 2);
+        },
+        .terminal_paste = [this]() {
+            if (char* clipboard = SDL_GetClipboardText()) {
+                if (clipboard[0]) terminal.write_input(clipboard);
+                SDL_free(clipboard);
+            }
+        },
+        .quit = [this]() { running = false; }
+    });
 
-        if (auto* ed = tab_bar.get_active_editor()) {
-            int visible = get_content_height() / font_manager.get_line_height();
-            auto result = ed->handle_key(event, visible);
-            if (result.cursor_moved) cursor_moved = true;
+    filetree_actions_ = std::make_unique<FileTreeActions>(action_registry, input_mapper);
+    filetree_actions_->register_all(
+        &file_tree,
+        [this]() -> int { return get_content_height() / font_manager.get_line_height(); },
+        [this]() -> bool { return tab_bar.has_tabs(); },
+        {
+            .get_selected = [this]() -> FileTreeNode* { return file_tree.get_selected(); },
+            .open_file = [this](const std::string& path) {
+                if (action_open_file(path)) cursor_moved = true;
+            },
+            .focus_editor = [this]() { focus = FocusPanel::Editor; },
+            .quit = [this]() { running = false; },
+            .start_create = [this](const std::string& path) { command_bar.start_create(path); },
+            .start_delete = [this](const std::string& path, const std::string& name) {
+                command_bar.start_delete(path, name);
+            }
         }
-    }
+    );
+
+    std::string config_path = get_config_path("keybindings.json");
+    KeybindingsLoader::load_from_json(input_mapper, config_path);
 }
 
 void Application::handle_command_bar_key(const SDL_Event& event) {
