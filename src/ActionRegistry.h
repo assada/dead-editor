@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <string>
 #include <string_view>
+#include <version>
 
 struct ActionResult {
     bool consumed = false;
@@ -13,7 +14,11 @@ struct ActionResult {
 
 class ActionRegistry {
 public:
+#if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
     using ActionCallback = std::move_only_function<ActionResult()>;
+#else
+    using ActionCallback = std::function<ActionResult()>; // FUCK YOU, libc++!
+#endif
 
     void register_action(std::string_view id, ActionCallback callback) {
         actions_.insert_or_assign(std::string(id), std::move(callback));
