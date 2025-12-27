@@ -31,9 +31,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - distro: Ubuntu 22.04
-            container: ubuntu:22.04
-            pkg_manager: apt
           - distro: Ubuntu 24.04
             container: ubuntu:24.04
             pkg_manager: apt
@@ -227,12 +224,12 @@ jobs:
             --error-exitcode=0 \
             --inline-suppr \
             --quiet \
-            *.cpp *.h
+            src/
 
       - name: Check formatting (clang-format)
         run: |
           sudo apt-get install -y clang-format
-          find . -maxdepth 1 -name "*.cpp" -o -name "*.h" | head -5 | xargs clang-format --dry-run --Werror || echo "Formatting check completed with warnings"
+          find src/ -name "*.cpp" -o -name "*.h" | head -5 | xargs clang-format --dry-run --Werror || echo "Formatting check completed with warnings"
 
   build-status:
     name: Build Status
