@@ -582,36 +582,6 @@ bool FileTree::handle_text_input(const char* text) {
     return true;
 }
 
-bool FileTree::handle_text_input_key(const SDL_Event& event) {
-    if (!is_loaded()) return false;
-
-    SDL_Keycode key = event.key.keysym.sym;
-    bool ctrl = (event.key.keysym.mod & META_MOD) != 0;
-    bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-
-    if (ctrl || key < SDLK_SPACE || key > SDLK_z) return false;
-    if (key >= SDLK_F1 && key <= SDLK_F12) return false;
-
-    char c = 0;
-    if (key >= SDLK_a && key <= SDLK_z) {
-        c = shift ? ('A' + (key - SDLK_a)) : ('a' + (key - SDLK_a));
-    } else if (key >= SDLK_0 && key <= SDLK_9) {
-        c = '0' + (key - SDLK_0);
-    } else if (key == SDLK_PERIOD) {
-        c = '.';
-    } else if (key == SDLK_MINUS) {
-        c = shift ? '_' : '-';
-    } else {
-        return false;
-    }
-
-    if (c != 0) {
-        char str[2] = {c, 0};
-        return handle_text_input(str);
-    }
-    return false;
-}
-
 FileTreeInputResult FileTree::handle_key_event(const SDL_Event& event, int visible_lines, bool file_is_open) {
     FileTreeInputResult result;
     if (!is_loaded()) return result;

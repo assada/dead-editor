@@ -260,12 +260,6 @@ void Application::dispatch_key_event(const SDL_Event& event) {
         terminal.handle_key_event(event);
         return;
     }
-
-    if (focus == FocusPanel::FileTree && file_tree.is_loaded()) {
-        if (file_tree.handle_text_input_key(event)) {
-            return;
-        }
-    }
 }
 
 InputContext Application::get_current_input_context() const {
