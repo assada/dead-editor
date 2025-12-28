@@ -21,6 +21,7 @@
 #include "AppActions.h"
 #include "FileTreeActions.h"
 #include "Toast.h"
+#include "SearchOverlay.h"
 
 class Application {
 public:
@@ -59,6 +60,7 @@ private:
     void toggle_focus();
     void update_title(const std::string& path = "");
     void ensure_cursor_visible();
+    void on_search_result_selected(const SearchResult& result);
 
     SDL_Color get_syntax_color(TokenType type);
     void on_font_changed();
@@ -116,4 +118,5 @@ private:
     std::unique_ptr<FileTreeActions> filetree_actions_;
 
     ToastManager toast_manager;
+    SearchOverlay search_overlay_;
 };

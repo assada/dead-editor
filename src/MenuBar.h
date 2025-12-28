@@ -39,6 +39,7 @@ struct MenuContext {
     std::function<void()> git_push;
     std::function<void()> git_reset_hard;
     std::function<void()> git_checkout;
+    std::function<bool()> is_git_repo;
 };
 
 struct MenuItem {
@@ -179,6 +180,19 @@ private:
         }
     }
 
+    bool is_action_enabled(MenuAction action) const {
+        switch (action) {
+            case MenuAction::GitCommit:
+            case MenuAction::GitPull:
+            case MenuAction::GitPush:
+            case MenuAction::GitResetHard:
+            case MenuAction::GitCheckout:
+                return ctx.is_git_repo && ctx.is_git_repo();
+            default:
+                return true;
+        }
+    }
+
 public:
     void set_context(MenuContext context) { ctx = std::move(context); }
 
@@ -243,9 +257,11 @@ public:
 
                 if (mouse_x >= dropdown_x && mouse_x < dropdown_x + menu.dropdown_width &&
                     mouse_y >= item_y && mouse_y < item_y + item_h) {
-                    MenuAction action = item.action;
-                    close();
-                    execute_action(action);
+                    if (is_action_enabled(item.action)) {
+                        MenuAction action = item.action;
+                        close();
+                        execute_action(action);
+                    }
                     return true;
                 }
 
@@ -364,7 +380,8 @@ private:
         int item_y = dropdown_y;
         for (int i = 0; i < static_cast<int>(menu.items.size()); i++) {
             const MenuItem& item = menu.items[i];
-            bool is_hovered = (hovered_item == i);
+            bool enabled = is_action_enabled(item.action);
+            bool is_hovered = (hovered_item == i) && enabled;
 
             if (is_hovered) {
                 SDL_SetRenderDrawColor(renderer, MENU_DROPDOWN_HOVER.r, MENU_DROPDOWN_HOVER.g,
@@ -373,13 +390,15 @@ private:
                 SDL_RenderFillRect(renderer, &item_bg);
             }
 
+            SDL_Color text_color = enabled ? MENU_TEXT : MENU_DISABLED;
             int text_y = item_y + (L->menu_dropdown_item_height - line_height) / 2;
-            texture_cache.render_cached_text(item.label.c_str(), MENU_TEXT,
+            texture_cache.render_cached_text(item.label.c_str(), text_color,
                                              dropdown_x + L->menu_item_padding, text_y);
 
             if (!item.shortcut.empty()) {
+                SDL_Color shortcut_color = enabled ? MENU_TEXT_DIM : MENU_DISABLED;
                 int shortcut_x = dropdown_x + menu.dropdown_width - L->menu_item_padding;
-                texture_cache.render_cached_text_right_aligned(item.shortcut.c_str(), MENU_TEXT_DIM,
+                texture_cache.render_cached_text_right_aligned(item.shortcut.c_str(), shortcut_color,
                                                                shortcut_x, text_y);
             }
 

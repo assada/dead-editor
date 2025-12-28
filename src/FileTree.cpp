@@ -23,9 +23,47 @@ std::string get_git_branch(const std::string& path) {
     return result;
 }
 
+std::string decode_git_path(const std::string& path) {
+    if (path.empty()) return path;
+
+    std::string input = path;
+    if (input.front() == '"' && input.back() == '"' && input.size() >= 2) {
+        input = input.substr(1, input.size() - 2);
+    }
+
+    std::string result;
+    result.reserve(input.size());
+
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '\\' && i + 3 < input.size() &&
+            input[i + 1] >= '0' && input[i + 1] <= '3' &&
+            input[i + 2] >= '0' && input[i + 2] <= '7' &&
+            input[i + 3] >= '0' && input[i + 3] <= '7') {
+            char c = static_cast<char>(
+                (input[i + 1] - '0') * 64 +
+                (input[i + 2] - '0') * 8 +
+                (input[i + 3] - '0')
+            );
+            result += c;
+            i += 3;
+        } else if (input[i] == '\\' && i + 1 < input.size()) {
+            switch (input[i + 1]) {
+                case 'n': result += '\n'; ++i; break;
+                case 't': result += '\t'; ++i; break;
+                case '\\': result += '\\'; ++i; break;
+                case '"': result += '"'; ++i; break;
+                default: result += input[i]; break;
+            }
+        } else {
+            result += input[i];
+        }
+    }
+    return result;
+}
+
 GitStatus get_git_status(const std::string& path) {
     GitStatus status;
-    const std::string cmd = "cd \"" + path + "\" && git status --porcelain 2>/dev/null";
+    const std::string cmd = "cd \"" + path + "\" && git status --porcelain --ignored 2>/dev/null";
     PipeHandle pipe(popen(cmd.c_str(), "r"));
     if (!pipe) return status;
 
@@ -43,20 +81,18 @@ GitStatus get_git_status(const std::string& path) {
             file = file.substr(arrow_pos + 4);
         }
 
+        file = decode_git_path(file);
         std::string full_path = path + "/" + file;
-        const bool is_untracked = (index_status == '?' && worktree_status == '?');
-        const bool is_added = (index_status == 'A');
+        if (full_path.back() == '/') full_path.pop_back();
 
-        auto& target_set = is_untracked ? status.untracked
-                         : is_added ? status.added
-                         : status.modified;
-
-        target_set.insert(full_path);
-
-        std::filesystem::path p(full_path);
-        while (p.has_parent_path() && p.string() != path) {
-            p = p.parent_path();
-            target_set.insert(p.string());
+        if (index_status == '!' && worktree_status == '!') {
+            status.ignored.insert(full_path);
+        } else if (index_status == '?' && worktree_status == '?') {
+            status.untracked.insert(full_path);
+        } else if (index_status != ' ' && index_status != '?') {
+            status.staged.insert(full_path);
+        } else if (worktree_status == 'M' || worktree_status == 'D') {
+            status.modified.insert(full_path);
         }
     }
     return status;
@@ -114,9 +150,10 @@ void FileTree::refresh_git_status_async() {
         {
             std::lock_guard<std::mutex> lock(git_mutex);
             pending_git_branch = std::move(branch);
+            pending_git_staged = std::move(status.staged);
             pending_git_modified = std::move(status.modified);
             pending_git_untracked = std::move(status.untracked);
-            pending_git_added = std::move(status.added);
+            pending_git_ignored = std::move(status.ignored);
         }
         git_refresh_pending.store(false);
     }).detach();
@@ -125,27 +162,31 @@ void FileTree::refresh_git_status_async() {
 void FileTree::apply_pending_git_status() {
     if (git_refresh_pending.load()) return;
     std::lock_guard<std::mutex> lock(git_mutex);
-    bool has_pending = !pending_git_branch.empty() || !pending_git_modified.empty() ||
-                       !pending_git_untracked.empty() || !pending_git_added.empty();
+    bool has_pending = !pending_git_branch.empty() || !pending_git_staged.empty() ||
+                       !pending_git_modified.empty() || !pending_git_untracked.empty() ||
+                       !pending_git_ignored.empty();
     if (!has_pending) return;
 
     bool changed = (pending_git_branch != current_git_branch) ||
+                   (pending_git_staged != current_git_staged) ||
                    (pending_git_modified != current_git_modified) ||
                    (pending_git_untracked != current_git_untracked) ||
-                   (pending_git_added != current_git_added);
+                   (pending_git_ignored != current_git_ignored);
 
     if (changed) {
         current_git_branch = pending_git_branch;
+        current_git_staged = pending_git_staged;
         current_git_modified = pending_git_modified;
         current_git_untracked = pending_git_untracked;
-        current_git_added = pending_git_added;
+        current_git_ignored = pending_git_ignored;
         git_status_changed.store(true);
     }
 
     git_branch = std::move(pending_git_branch);
+    git_staged_files = std::move(pending_git_staged);
     git_modified_files = std::move(pending_git_modified);
     git_untracked_files = std::move(pending_git_untracked);
-    git_added_files = std::move(pending_git_added);
+    git_ignored_files = std::move(pending_git_ignored);
 }
 
 void FileTree::check_git_changes() {
@@ -158,6 +199,10 @@ void FileTree::check_git_changes() {
     }
 }
 
+bool FileTree::is_file_staged(const std::string& path) const {
+    return git_staged_files.find(path) != git_staged_files.end();
+}
+
 bool FileTree::is_file_modified(const std::string& path) const {
     return git_modified_files.find(path) != git_modified_files.end();
 }
@@ -166,13 +211,22 @@ bool FileTree::is_file_untracked(const std::string& path) const {
     return git_untracked_files.find(path) != git_untracked_files.end();
 }
 
-bool FileTree::is_file_added(const std::string& path) const {
-    return git_added_files.find(path) != git_added_files.end();
+bool FileTree::is_file_ignored(const std::string& path) const {
+    if (git_ignored_files.find(path) != git_ignored_files.end()) {
+        return true;
+    }
+    std::filesystem::path p(path);
+    while (p.has_parent_path() && p.string() != root_path) {
+        p = p.parent_path();
+        if (git_ignored_files.find(p.string()) != git_ignored_files.end()) {
+            return true;
+        }
+    }
+    return false;
 }
 
-bool FileTree::is_file_staged(const std::string& path) const {
-    return git_added_files.find(path) != git_added_files.end() ||
-           git_modified_files.find(path) != git_modified_files.end();
+bool FileTree::is_root_node(const FileTreeNode* node) const {
+    return node && node->full_path == root_path;
 }
 
 bool FileTree::is_git_repo() const {
@@ -306,6 +360,11 @@ void FileTree::load_children(FileTreeNode& node) {
         for (const auto& entry : std::filesystem::directory_iterator(node.full_path)) {
             FileTreeNode child;
             child.name = entry.path().filename().string();
+
+            if (!show_hidden_files && !child.name.empty() && child.name[0] == '.') {
+                continue;
+            }
+
             child.full_path = entry.path().string();
             child.is_directory = entry.is_directory();
             child.expanded = false;
@@ -348,7 +407,7 @@ void FileTree::toggle_expand() {
     auto& nodes = is_filtering() ? filtered_nodes : visible_nodes;
     if (selected_index < 0 || selected_index >= static_cast<int>(nodes.size())) return;
     FileTreeNode* node = nodes[selected_index];
-    if (!node->is_directory) return;
+    if (!node->is_directory || is_root_node(node)) return;
 
     node->expanded = !node->expanded;
     if (node->expanded && node->children.empty()) {
@@ -664,7 +723,7 @@ FileTreeInputResult FileTree::handle_key_event(const SDL_Event& event, int visib
         case SDLK_n: {
             if (ctrl && !is_filtering()) {
                 FileTreeNode* selected = get_selected();
-                if (selected) {
+                if (selected && !is_root_node(selected)) {
                     result.action = FileTreeAction::StartCreate;
                     result.path = selected->is_directory
                         ? selected->full_path
@@ -676,7 +735,7 @@ FileTreeInputResult FileTree::handle_key_event(const SDL_Event& event, int visib
         case SDLK_DELETE: {
             if (!is_filtering()) {
                 FileTreeNode* selected = get_selected();
-                if (selected && selected->full_path != root_path) {
+                if (selected && !is_root_node(selected)) {
                     result.action = FileTreeAction::StartDelete;
                     result.path = selected->full_path;
                     result.name = selected->name;
@@ -714,30 +773,34 @@ void FileTree::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& text
     SDL_Rect tree_border = {x + width - 1, y, 1, height};
     SDL_RenderFillRect(renderer, &tree_border);
 
+    render_toolbar(renderer, font, texture_cache, x, y, width);
+    int toolbar_offset = TOOLBAR_HEIGHT;
+
     int filter_bar_height = 0;
     if (is_filtering()) {
         filter_bar_height = line_height + PADDING;
         SDL_SetRenderDrawColor(renderer, Colors::SEARCH_BG.r, Colors::SEARCH_BG.g, Colors::SEARCH_BG.b, 255);
-        SDL_Rect filter_bg = {x, y, width, filter_bar_height};
+        SDL_Rect filter_bg = {x, y + toolbar_offset, width, filter_bar_height};
         SDL_RenderFillRect(renderer, &filter_bg);
 
         std::string filter_text = " " + filter_query;
-        texture_cache.render_cached_text(filter_text, Colors::TEXT, x + PADDING, y + PADDING / 2);
+        texture_cache.render_cached_text(filter_text, Colors::TEXT, x + PADDING, y + toolbar_offset + PADDING / 2);
 
         if (cursor_visible && has_focus) {
             int filter_w = 0;
             TTF_SizeUTF8(font, filter_text.c_str(), &filter_w, nullptr);
             SDL_SetRenderDrawColor(renderer, Colors::CURSOR.r, Colors::CURSOR.g, Colors::CURSOR.b, 255);
-            SDL_Rect filter_cursor = {x + PADDING + filter_w, y + PADDING / 2, 2, line_height};
+            SDL_Rect filter_cursor = {x + PADDING + filter_w, y + toolbar_offset + PADDING / 2, 2, line_height};
             SDL_RenderFillRect(renderer, &filter_cursor);
         }
     }
 
-    SDL_Rect tree_clip = {x, y + filter_bar_height, width, height - filter_bar_height};
+    int content_offset = toolbar_offset + filter_bar_height;
+    SDL_Rect tree_clip = {x, y + content_offset, width, height - content_offset};
     SDL_RenderSetClipRect(renderer, &tree_clip);
 
     auto& display_nodes = is_filtering() ? filtered_nodes : visible_nodes;
-    int tree_y = y + PADDING + filter_bar_height;
+    int tree_y = y + PADDING + content_offset;
 
     for (int idx = scroll_offset;
          idx < static_cast<int>(display_nodes.size()) && tree_y < y + height;
@@ -769,13 +832,19 @@ void FileTree::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& text
         }
         std::string display_name = prefix + node->name;
 
-        SDL_Color node_color = node->is_directory ? Colors::SYNTAX_FUNCTION : Colors::TEXT;
-        if (is_file_untracked(node->full_path)) {
-            node_color = node->is_directory ? Colors::GIT_UNTRACKED_DIR : Colors::GIT_UNTRACKED;
-        } else if (is_file_modified(node->full_path)) {
-            node_color = Colors::GIT_MODIFIED;
-        } else if (is_file_added(node->full_path)) {
-            node_color = Colors::GIT_ADDED;
+        SDL_Color node_color = Colors::TEXT;
+        if (node->is_directory) {
+            node_color = get_directory_git_color(node->full_path);
+        } else {
+            if (is_file_ignored(node->full_path)) {
+                node_color = Colors::GIT_IGNORED;
+            } else if (is_file_staged(node->full_path)) {
+                node_color = Colors::GIT_STAGED;
+            } else if (is_file_modified(node->full_path)) {
+                node_color = Colors::GIT_MODIFIED;
+            } else if (is_file_untracked(node->full_path)) {
+                node_color = Colors::GIT_UNTRACKED;
+            }
         }
 
         if (!current_editor_path.empty() && node->full_path == current_editor_path) {
@@ -793,7 +862,7 @@ void FileTree::handle_mouse_click(int /* x */, int y, int line_height) {
     if (!is_loaded()) return;
 
     int filter_bar_height = is_filtering() ? line_height + PADDING : 0;
-    int content_y_start = PADDING + filter_bar_height;
+    int content_y_start = TOOLBAR_HEIGHT + PADDING + filter_bar_height;
 
     if (y < content_y_start) return;
 
@@ -805,7 +874,7 @@ void FileTree::handle_mouse_click(int /* x */, int y, int line_height) {
     selected_index = clicked_index;
     FileTreeNode* node = display_nodes[selected_index];
 
-    if (node->is_directory) {
+    if (node->is_directory && !is_root_node(node)) {
         node->expanded = !node->expanded;
         if (node->expanded && node->children.empty()) {
             load_children(*node);
@@ -821,7 +890,7 @@ std::string FileTree::handle_mouse_double_click(int /* x */, int y, int line_hei
     if (!is_loaded()) return "";
 
     int filter_bar_height = is_filtering() ? line_height + PADDING : 0;
-    int content_y_start = PADDING + filter_bar_height;
+    int content_y_start = TOOLBAR_HEIGHT + PADDING + filter_bar_height;
 
     if (y < content_y_start) return "";
 
@@ -850,7 +919,7 @@ int FileTree::get_index_at_position(int y, int line_height) {
     if (!is_loaded()) return -1;
 
     int filter_bar_height = is_filtering() ? line_height + PADDING : 0;
-    int content_y_start = PADDING + filter_bar_height;
+    int content_y_start = TOOLBAR_HEIGHT + PADDING + filter_bar_height;
 
     if (y < content_y_start) return -1;
 
@@ -860,4 +929,161 @@ int FileTree::get_index_at_position(int y, int line_height) {
     if (clicked_index < 0 || clicked_index >= static_cast<int>(display_nodes.size())) return -1;
 
     return clicked_index;
+}
+
+void FileTree::collapse_all() {
+    std::function<void(FileTreeNode*)> collapse_recursive = [&](FileTreeNode* node) {
+        if (node->is_directory && !is_root_node(node)) {
+            node->expanded = false;
+        }
+        for (auto& child : node->children) {
+            collapse_recursive(&child);
+        }
+    };
+    collapse_recursive(&root);
+    rebuild_visible();
+    selected_index = 0;
+    scroll_offset = 0;
+}
+
+void FileTree::scroll_to_path(const std::string& path, int visible_lines) {
+    if (path.empty() || !is_loaded()) return;
+    if (is_filtering()) {
+        clear_filter_and_select(nullptr);
+    }
+    expand_and_select_path(path);
+    ensure_visible(visible_lines);
+}
+
+void FileTree::toggle_hidden_files() {
+    show_hidden_files = !show_hidden_files;
+    std::unordered_set<std::string> expanded_paths;
+    collect_expanded_paths(&root, expanded_paths);
+    root.children.clear();
+    load_children(root);
+    restore_expanded_paths(&root, expanded_paths);
+    rebuild_visible();
+}
+
+void FileTree::reveal_in_file_manager(const std::string& path) {
+    std::string dir_path = path;
+    if (!std::filesystem::is_directory(path)) {
+        dir_path = std::filesystem::path(path).parent_path().string();
+    }
+    std::string cmd = "xdg-open \"" + dir_path + "\" 2>/dev/null &";
+    std::ignore = system(cmd.c_str());
+}
+
+bool FileTree::has_git_changes_in_directory(const std::string& dir_path) const {
+    auto check_prefix = [&dir_path](const std::unordered_set<std::string>& files) {
+        for (const auto& file : files) {
+            if (file.find(dir_path + "/") == 0) return true;
+        }
+        return false;
+    };
+    return check_prefix(git_staged_files) ||
+           check_prefix(git_modified_files) ||
+           check_prefix(git_untracked_files);
+}
+
+SDL_Color FileTree::get_directory_git_color(const std::string& dir_path) const {
+    if (is_file_ignored(dir_path)) {
+        return Colors::GIT_IGNORED;
+    }
+    if (is_file_untracked(dir_path)) {
+        return Colors::GIT_UNTRACKED;
+    }
+
+    bool has_staged = false;
+    bool has_modified = false;
+
+    for (const auto& file : git_staged_files) {
+        if (file.find(dir_path + "/") == 0) { has_staged = true; break; }
+    }
+    for (const auto& file : git_modified_files) {
+        if (file.find(dir_path + "/") == 0) { has_modified = true; break; }
+    }
+
+    if (has_modified) return Colors::GIT_MODIFIED;
+    if (has_staged) return Colors::GIT_STAGED;
+    return Colors::SYNTAX_FUNCTION;
+}
+
+void FileTree::render_toolbar(SDL_Renderer* renderer, TTF_Font* font, TextureCache& texture_cache, int x, int y, int width) {
+    toolbar_width_ = width;
+
+    SDL_SetRenderDrawColor(renderer, 35, 35, 42, 255);
+    SDL_Rect toolbar_bg = {x, y, width, TOOLBAR_HEIGHT};
+    SDL_RenderFillRect(renderer, &toolbar_bg);
+
+    SDL_SetRenderDrawColor(renderer, 50, 50, 55, 255);
+    SDL_RenderDrawLine(renderer, x, y + TOOLBAR_HEIGHT - 1, x + width, y + TOOLBAR_HEIGHT - 1);
+
+    int btn_y = y + (TOOLBAR_HEIGHT - TOOLBAR_BUTTON_SIZE) / 2;
+
+    struct ToolbarButton {
+        const char* icon;
+        bool active;
+    };
+
+    ToolbarButton buttons[] = {
+        {"", false},
+        {show_hidden_files ? "" : "", show_hidden_files},
+        {"󰡍", false}
+    };
+
+    for (int i = 0; i < 3; ++i) {
+        int btn_x = x + width - PADDING - TOOLBAR_BUTTON_SIZE - i * (TOOLBAR_BUTTON_SIZE + TOOLBAR_BUTTON_GAP);
+
+        bool is_hovered = (hovered_toolbar_button == i);
+
+        if (is_hovered) {
+            SDL_SetRenderDrawColor(renderer, 60, 60, 70, 255);
+            SDL_Rect btn_bg = {btn_x - 2, btn_y - 2, TOOLBAR_BUTTON_SIZE + 4, TOOLBAR_BUTTON_SIZE + 4};
+            SDL_RenderFillRect(renderer, &btn_bg);
+        }
+
+        SDL_Color btn_color = buttons[i].active ? Colors::SYNTAX_KEYWORD :
+                              is_hovered ? Colors::TEXT : SDL_Color{140, 140, 150, 255};
+
+        int text_w = 0, text_h = 0;
+        TTF_SizeUTF8(font, buttons[i].icon, &text_w, &text_h);
+        int text_x = btn_x + (TOOLBAR_BUTTON_SIZE - text_w) / 2;
+        int text_y = btn_y + (TOOLBAR_BUTTON_SIZE - text_h) / 2;
+
+        texture_cache.render_cached_text(buttons[i].icon, btn_color, text_x, text_y);
+    }
+}
+
+FileTreeToolbarAction FileTree::handle_toolbar_click(int local_x, int local_y, int width) {
+    if (local_y < 0 || local_y >= TOOLBAR_HEIGHT) return FileTreeToolbarAction::None;
+
+    for (int i = 0; i < 3; ++i) {
+        int btn_left = width - PADDING - TOOLBAR_BUTTON_SIZE - i * (TOOLBAR_BUTTON_SIZE + TOOLBAR_BUTTON_GAP);
+        int btn_right = btn_left + TOOLBAR_BUTTON_SIZE;
+
+        if (local_x >= btn_left && local_x < btn_right) {
+            switch (i) {
+                case 0: return FileTreeToolbarAction::NewFile;
+                case 1: return FileTreeToolbarAction::ToggleHidden;
+                case 2: return FileTreeToolbarAction::CollapseAll;
+            }
+        }
+    }
+    return FileTreeToolbarAction::None;
+}
+
+void FileTree::update_toolbar_hover(int local_x, int local_y, int width) {
+    hovered_toolbar_button = -1;
+    if (local_y < 0 || local_y >= TOOLBAR_HEIGHT) return;
+
+    for (int i = 0; i < 3; ++i) {
+        int btn_left = width - PADDING - TOOLBAR_BUTTON_SIZE - i * (TOOLBAR_BUTTON_SIZE + TOOLBAR_BUTTON_GAP);
+        int btn_right = btn_left + TOOLBAR_BUTTON_SIZE;
+
+        if (local_x >= btn_left && local_x < btn_right) {
+            hovered_toolbar_button = i;
+            return;
+        }
+    }
 }

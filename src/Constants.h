@@ -88,9 +88,9 @@ namespace Colors {
     constexpr SDL_Color SYNTAX_VARIABLE = {229, 192, 123, 255};
 
     constexpr SDL_Color GIT_MODIFIED = {229, 192, 123, 255};
-    constexpr SDL_Color GIT_ADDED = {172, 229, 123, 255};
-    constexpr SDL_Color GIT_UNTRACKED = {130, 130, 140, 255};
-    constexpr SDL_Color GIT_UNTRACKED_DIR = {70, 110, 145, 255};
+    constexpr SDL_Color GIT_STAGED = {152, 195, 121, 255};
+    constexpr SDL_Color GIT_UNTRACKED = {224, 108, 117, 255};
+    constexpr SDL_Color GIT_IGNORED = {100, 100, 110, 255};
     constexpr SDL_Color GIT_BRANCH = {152, 195, 121, 255};
 
     constexpr SDL_Color TERMINAL_DEFAULT_FG = {220, 220, 220, 255};
@@ -131,6 +131,7 @@ constexpr SDL_Color MENU_DROPDOWN_BG = {35, 35, 42, 255};
 constexpr SDL_Color MENU_DROPDOWN_HOVER = {55, 55, 65, 255};
 constexpr SDL_Color MENU_TEXT = {200, 200, 205, 255};
 constexpr SDL_Color MENU_TEXT_DIM = {120, 120, 130, 255};
+constexpr SDL_Color MENU_DISABLED = {80, 80, 90, 255};
 constexpr SDL_Color MENU_SEPARATOR = {60, 60, 70, 255};
 
 #ifdef __APPLE__

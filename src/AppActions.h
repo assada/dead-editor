@@ -30,6 +30,7 @@ struct AppActionContext {
     std::function<void()> quit;
 
     std::function<void()> git_commit;
+    std::function<void()> scroll_to_source;
 };
 
 class AppActions {
@@ -138,6 +139,11 @@ public:
             return {true, false};
         });
 
+        registry_.register_action(Actions::App::ScrollToSource, [this]() -> ActionResult {
+            if (ctx_.scroll_to_source) ctx_.scroll_to_source();
+            return {true, false};
+        });
+
         setup_default_bindings();
     }
 
@@ -172,6 +178,7 @@ private:
         mapper_.bind({SDLK_v, KeyMod::CtrlShift}, TerminalPaste, InputContext::Terminal);
 
         mapper_.bind({SDLK_k, KeyMod::Ctrl}, Actions::Git::Commit, InputContext::Global);
+        mapper_.bind({SDLK_F1, KeyMod::Alt}, ScrollToSource, InputContext::Global);
     }
 
     ActionRegistry& registry_;

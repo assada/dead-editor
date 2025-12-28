@@ -68,6 +68,9 @@ namespace Actions {
         constexpr const char* Backspace = "filetree.backspace";
         constexpr const char* Delete = "filetree.delete";
         constexpr const char* Create = "filetree.create";
+        constexpr const char* CollapseAll = "filetree.collapse_all";
+        constexpr const char* ToggleHidden = "filetree.toggle_hidden";
+        constexpr const char* RevealInFileManager = "filetree.reveal_in_file_manager";
     }
 
     namespace Editor {
@@ -131,6 +134,7 @@ namespace Actions {
         constexpr const char* ToggleFocus = "app.toggle_focus";
         constexpr const char* FocusTerminal = "app.focus_terminal";
         constexpr const char* ToggleTerminal = "app.toggle_terminal";
+        constexpr const char* ScrollToSource = "app.scroll_to_source";
 
         constexpr const char* NextTab = "app.next_tab";
         constexpr const char* PrevTab = "app.prev_tab";

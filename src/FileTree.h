@@ -27,9 +27,10 @@ struct FileTreeInputResult {
 };
 
 struct GitStatus {
+    std::unordered_set<std::string> staged;
     std::unordered_set<std::string> modified;
-    std::unordered_set<std::string> added;
     std::unordered_set<std::string> untracked;
+    std::unordered_set<std::string> ignored;
 };
 
 std::string get_git_branch(const std::string& path);
@@ -51,6 +52,13 @@ struct FileTreeNode {
     int depth = 0;
 };
 
+enum class FileTreeToolbarAction {
+    None,
+    CollapseAll,
+    ToggleHidden,
+    NewFile
+};
+
 struct FileTree {
     std::string root_path;
     FileTreeNode root;
@@ -58,21 +66,25 @@ struct FileTree {
     int selected_index = 0;
     int scroll_offset = 0;
     int context_menu_index = -1;
+    int hovered_toolbar_button = -1;
     bool active = false;
+    bool show_hidden_files = false;
     std::string filter_query;
     std::vector<FileTreeNode*> filtered_nodes;
     std::unordered_set<std::string> expanded_before_filter;
     std::string git_branch;
+    std::unordered_set<std::string> git_staged_files;
     std::unordered_set<std::string> git_modified_files;
     std::unordered_set<std::string> git_untracked_files;
-    std::unordered_set<std::string> git_added_files;
+    std::unordered_set<std::string> git_ignored_files;
 
     std::mutex git_mutex;
     std::atomic<bool> git_refresh_pending{false};
     std::string pending_git_branch;
+    std::unordered_set<std::string> pending_git_staged;
     std::unordered_set<std::string> pending_git_modified;
     std::unordered_set<std::string> pending_git_untracked;
-    std::unordered_set<std::string> pending_git_added;
+    std::unordered_set<std::string> pending_git_ignored;
 
     std::mutex fs_mutex;
     std::atomic<bool> fs_scan_pending{false};
@@ -83,9 +95,10 @@ struct FileTree {
     static constexpr Uint32 FS_SCAN_INTERVAL_MS = 150;
 
     std::string current_git_branch;
+    std::unordered_set<std::string> current_git_staged;
     std::unordered_set<std::string> current_git_modified;
     std::unordered_set<std::string> current_git_untracked;
-    std::unordered_set<std::string> current_git_added;
+    std::unordered_set<std::string> current_git_ignored;
     std::atomic<bool> git_status_changed{false};
     Uint32 last_git_scan_time = 0;
     static constexpr Uint32 GIT_SCAN_INTERVAL_MS = 500;
@@ -93,11 +106,12 @@ struct FileTree {
     void refresh_git_status_async();
     void apply_pending_git_status();
     void check_git_changes();
+    bool is_file_staged(const std::string& path) const;
     bool is_file_modified(const std::string& path) const;
     bool is_file_untracked(const std::string& path) const;
-    bool is_file_added(const std::string& path) const;
-    bool is_file_staged(const std::string& path) const;
+    bool is_file_ignored(const std::string& path) const;
     bool is_git_repo() const;
+    bool is_root_node(const FileTreeNode* node) const;
     void collect_fs_snapshot(const std::string& dir_path, std::unordered_set<std::string>& snapshot);
     void scan_filesystem_async();
     void check_filesystem_changes();
@@ -143,4 +157,20 @@ struct FileTree {
                 int line_height,
                 bool has_focus, bool cursor_visible,
                 const std::string& current_editor_path);
+
+    void collapse_all();
+    void scroll_to_path(const std::string& path, int visible_lines);
+    void toggle_hidden_files();
+    void reveal_in_file_manager(const std::string& path);
+    bool has_git_changes_in_directory(const std::string& dir_path) const;
+    SDL_Color get_directory_git_color(const std::string& dir_path) const;
+
+    static constexpr int TOOLBAR_HEIGHT = 28;
+    static constexpr int TOOLBAR_BUTTON_SIZE = 22;
+    static constexpr int TOOLBAR_BUTTON_GAP = 6;
+    int toolbar_width_ = 0;
+    int get_toolbar_height() const { return TOOLBAR_HEIGHT; }
+    void render_toolbar(SDL_Renderer* renderer, TTF_Font* font, TextureCache& texture_cache, int x, int y, int width);
+    FileTreeToolbarAction handle_toolbar_click(int local_x, int local_y, int width);
+    void update_toolbar_hover(int local_x, int local_y, int width);
 };

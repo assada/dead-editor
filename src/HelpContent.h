@@ -28,6 +28,7 @@ FEATURES
   • Smart selection expansion
   • Go to definition (F12)
   • Search and Go to line
+  • Find in Files (requires ripgrep)
   • Undo/Redo with grouping
   • Auto-pairing for brackets and quotes
 
@@ -108,6 +109,7 @@ EDITING
 SEARCH
 ────────────────────────────────────────────────────────────────────────────────
   Ctrl+F              Open search bar
+  Ctrl+Shift+F        Find in files (project-wide, requires ripgrep)
   Enter               Find next (in search mode)
   F3                  Find next
   Esc                 Close search bar

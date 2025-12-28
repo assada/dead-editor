@@ -77,6 +77,10 @@ void Application::init_ui() {
 
     font_manager.set_on_font_changed([this]() { on_font_changed(); });
 
+    search_overlay_.set_on_error([this](const std::string& title, const std::string& msg) {
+        toast_manager.show_error(title, msg);
+    });
+
     tab_bar.set_layout(&layout);
     tab_bar.set_font(font_manager.get());
 
@@ -149,7 +153,8 @@ void Application::init_ui() {
         },
         .git_checkout = [this]() {
             if (file_tree.is_git_repo()) command_bar.start_git_checkout();
-        }
+        },
+        .is_git_repo = [this]() { return file_tree.is_git_repo(); }
     });
 
     SDL_StartTextInput();
@@ -228,6 +233,11 @@ void Application::dispatch_text_input(const SDL_Event& event) {
 
     if (is_meta_pressed()) return;
 
+    if (search_overlay_.visible) {
+        search_overlay_.handle_text_input(event.text.text);
+        return;
+    }
+
     if (command_bar.handle_text_input(event.text.text)) return;
 
     switch (focus) {
@@ -248,6 +258,24 @@ void Application::dispatch_text_input(const SDL_Event& event) {
 
 void Application::dispatch_key_event(const SDL_Event& event) {
     reset_cursor_blink();
+
+    if (search_overlay_.visible) {
+        search_overlay_.handle_key(event, [this](const SearchResult& res) {
+            on_search_result_selected(res);
+        });
+        return;
+    }
+
+    SDL_Keymod mod = SDL_GetModState();
+    bool ctrl = (mod & KMOD_CTRL) != 0;
+    bool shift = (mod & KMOD_SHIFT) != 0;
+    SDL_Keycode key = event.key.keysym.sym;
+
+    if (ctrl && shift && key == SDLK_f && file_tree.is_loaded()) {
+        search_overlay_.set_root_path(file_tree.root_path);
+        search_overlay_.show();
+        return;
+    }
 
     if (command_bar.is_active()) {
         handle_command_bar_key(event);
@@ -357,6 +385,16 @@ void Application::setup_actions() {
         .quit = [this]() { running = false; },
         .git_commit = [this]() {
             if (file_tree.is_git_repo()) command_bar.start_git_commit();
+        },
+        .scroll_to_source = [this]() {
+            if (auto* tab = tab_bar.get_tab(tab_bar.get_active_index())) {
+                std::string path = tab->get_path();
+                if (!path.empty() && file_tree.is_loaded()) {
+                    int visible = get_content_height() / font_manager.get_line_height();
+                    file_tree.scroll_to_path(path, visible);
+                    focus = FocusPanel::FileTree;
+                }
+            }
         }
     });
 
@@ -375,6 +413,10 @@ void Application::setup_actions() {
             .start_create = [this](const std::string& path) { command_bar.start_create(path); },
             .start_delete = [this](const std::string& path, const std::string& name) {
                 command_bar.start_delete(path, name);
+            },
+            .get_current_editor_path = [this]() -> std::string {
+                if (auto* tab = tab_bar.get_tab(tab_bar.get_active_index())) return tab->get_path();
+                return "";
             }
         }
     );
@@ -488,7 +530,9 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         }
 
         if (context_menu.is_open()) {
-            context_menu.handle_mouse_click(mx, my);
+            if (context_menu.handle_mouse_click(mx, my)) {
+                menu_click_consumed = true;
+            }
             file_tree.context_menu_index = -1;
             return;
         }
@@ -701,8 +745,32 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         if (menu_click_consumed) { menu_click_consumed = false; dragging.editor = false; return; }
 
         if (file_tree.is_loaded() && mx < tree_w && my >= layout.menu_bar_height && my < term_y) {
+            int local_x = mx;
             int local_y = my - layout.menu_bar_height;
-            if (event.button.clicks == 2) {
+
+            auto toolbar_action = file_tree.handle_toolbar_click(local_x, local_y, tree_w);
+            if (toolbar_action != FileTreeToolbarAction::None) {
+                switch (toolbar_action) {
+                    case FileTreeToolbarAction::CollapseAll:
+                        file_tree.collapse_all();
+                        break;
+                    case FileTreeToolbarAction::ToggleHidden:
+                        file_tree.toggle_hidden_files();
+                        break;
+                    case FileTreeToolbarAction::NewFile: {
+                        std::string target_path = file_tree.root_path;
+                        if (auto* selected = file_tree.get_selected()) {
+                            target_path = selected->is_directory
+                                ? selected->full_path
+                                : std::filesystem::path(selected->full_path).parent_path().string();
+                        }
+                        command_bar.start_create(target_path);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            } else if (event.button.clicks == 2) {
                 std::string path = file_tree.handle_mouse_double_click(mx, local_y, font_manager.get_line_height());
                 if (!path.empty() && action_open_file(path)) cursor_moved = true;
             } else if (!dragging.editor) {
@@ -753,6 +821,14 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         menu_bar.handle_mouse_motion(motion_x, motion_y);
         if (tab_bar.has_tabs() && motion_x >= tree_w && motion_y >= layout.menu_bar_height && motion_y < layout.menu_bar_height + tab_h) {
             tab_bar.handle_mouse_motion(motion_x - tree_w, motion_y - layout.menu_bar_height);
+        }
+
+        if (file_tree.is_loaded() && motion_x < tree_w && motion_y >= layout.menu_bar_height && motion_y < term_y) {
+            int local_x = motion_x;
+            int local_y = motion_y - layout.menu_bar_height;
+            file_tree.update_toolbar_hover(local_x, local_y, tree_w);
+        } else {
+            file_tree.hovered_toolbar_button = -1;
         }
 
         bool on_tree_border = file_tree.is_loaded() && motion_x >= tree_w - 5 && motion_x <= tree_w + 5 && motion_y >= layout.menu_bar_height && motion_y < term_y;
@@ -835,6 +911,9 @@ void Application::render() {
 
     menu_bar.render_dropdown_overlay(renderer.get(), texture_cache, line_h);
     context_menu.render(renderer.get(), texture_cache, line_h);
+
+    search_overlay_.render(renderer.get(), layout, texture_cache, font_manager.get(), window_w, window_h);
+
     toast_manager.render(renderer.get(), texture_cache, window_w, window_h, line_h);
 
     SDL_RenderPresent(renderer.get());
@@ -860,6 +939,7 @@ void Application::action_open_folder(const std::string& path) {
     tree_width = layout.file_tree_width;
     focus = FocusPanel::FileTree;
     update_title(path);
+    search_overlay_.set_root_path(path);
 }
 
 void Application::action_save_current() {
@@ -1092,4 +1172,16 @@ int Application::get_content_height() const {
     int tab_h = tab_bar.has_tabs() ? layout.tab_bar_height : 0;
     int content_y = layout.menu_bar_height + tab_h;
     return command_bar_y - content_y;
+}
+
+void Application::on_search_result_selected(const SearchResult& result) {
+    if (action_open_file(result.file_path)) {
+        if (auto* ed = tab_bar.get_active_editor()) {
+            ed->go_to({result.line, result.col});
+            int visible = get_content_height() / font_manager.get_line_height();
+            ed->ensure_visible(visible);
+            focus = FocusPanel::Editor;
+            cursor_moved = true;
+        }
+    }
 }

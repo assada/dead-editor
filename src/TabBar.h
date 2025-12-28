@@ -412,12 +412,14 @@ public:
 
             SDL_Color text_color = (i == active_tab) ? TAB_TEXT_ACTIVE : TAB_TEXT_INACTIVE;
             if (file_tree && !tab.get_path().empty()) {
-                if (file_tree->is_file_untracked(tab.get_path())) {
-                    text_color = Colors::GIT_UNTRACKED;
+                if (file_tree->is_file_ignored(tab.get_path())) {
+                    text_color = Colors::GIT_IGNORED;
+                } else if (file_tree->is_file_staged(tab.get_path())) {
+                    text_color = Colors::GIT_STAGED;
                 } else if (file_tree->is_file_modified(tab.get_path())) {
                     text_color = Colors::GIT_MODIFIED;
-                } else if (file_tree->is_file_added(tab.get_path())) {
-                    text_color = Colors::GIT_ADDED;
+                } else if (file_tree->is_file_untracked(tab.get_path())) {
+                    text_color = Colors::GIT_UNTRACKED;
                 }
             }
             texture_cache.render_cached_text(tab.title.c_str(), text_color, text_x, text_y);

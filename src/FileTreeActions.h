@@ -11,6 +11,7 @@ struct FileTreeActionContext {
     std::function<void()> quit;
     std::function<void(const std::string&)> start_create;
     std::function<void(const std::string&, const std::string&)> start_delete;
+    std::function<std::string()> get_current_editor_path;
 };
 
 class FileTreeActions {
@@ -161,12 +162,33 @@ private:
 
         registry_.register_action(Actions::FileTree::Create, [this]() -> ActionResult {
             if (!tree_ || !tree_->is_loaded() || tree_->is_filtering()) return {};
-            FileTreeNode* selected = tree_->get_selected();
-            if (selected) {
-                std::string path = selected->is_directory
+            std::string path = tree_->root_path;
+            if (FileTreeNode* selected = tree_->get_selected()) {
+                path = selected->is_directory
                     ? selected->full_path
                     : std::filesystem::path(selected->full_path).parent_path().string();
-                if (ctx_.start_create) ctx_.start_create(path);
+            }
+            if (ctx_.start_create) ctx_.start_create(path);
+            return {true, false};
+        });
+
+        registry_.register_action(Actions::FileTree::CollapseAll, [this]() -> ActionResult {
+            if (!tree_ || !tree_->is_loaded()) return {};
+            tree_->collapse_all();
+            return {true, false};
+        });
+
+        registry_.register_action(Actions::FileTree::ToggleHidden, [this]() -> ActionResult {
+            if (!tree_ || !tree_->is_loaded()) return {};
+            tree_->toggle_hidden_files();
+            return {true, false};
+        });
+
+        registry_.register_action(Actions::FileTree::RevealInFileManager, [this]() -> ActionResult {
+            if (!tree_ || !tree_->is_loaded()) return {};
+            FileTreeNode* selected = tree_->get_selected();
+            if (selected) {
+                tree_->reveal_in_file_manager(selected->full_path);
             }
             return {true, false};
         });

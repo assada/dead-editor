@@ -21,6 +21,23 @@ sudo dnf install SDL2 SDL2_ttf libtree-sitter
 sudo pacman -S sdl2 sdl2_ttf tree-sitter
 ```
 
+### Optional
+
+```bash
+# All platforms - install ripgrep for global search (Ctrl+Shift+F)
+# Ubuntu/Debian
+sudo apt install ripgrep
+
+# Fedora
+sudo dnf install ripgrep
+
+# Arch
+sudo pacman -S ripgrep
+
+# macOS
+brew install ripgrep
+```
+
 ### macOS
 
 ```bash
