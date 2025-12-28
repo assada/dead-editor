@@ -1,9 +1,10 @@
 #pragma once
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <string>
 #include <vector>
-#include <functional>
+#include <algorithm>
 #include "Constants.h"
 #include "Layout.h"
 #include "TextureCache.h"
@@ -36,6 +37,7 @@ struct Toast {
 class ToastManager {
 public:
     void set_layout(const Layout* l) { layout_ = l; }
+    void set_font(TTF_Font* f) { font_ = f; }
 
     void show(const std::string& title, const std::string& message, ToastType type, Uint32 delay_ms = 3000) {
         toasts_.push_back({
@@ -81,13 +83,14 @@ public:
         int toast_y = window_h - layout_->status_bar_height - TOAST_MARGIN;
 
         for (auto it = toasts_.rbegin(); it != toasts_.rend(); ++it) {
+            int toast_width = calculate_toast_width(*it);
             int toast_height = calculate_toast_height(*it);
             toast_y -= toast_height + TOAST_SPACING;
 
             SDL_Rect rect = {
-                window_w - TOAST_WIDTH - TOAST_MARGIN,
+                window_w - toast_width - TOAST_MARGIN,
                 toast_y,
-                TOAST_WIDTH,
+                toast_width,
                 toast_height
             };
 
@@ -110,19 +113,21 @@ public:
 
         for (auto it = toasts_.rbegin(); it != toasts_.rend(); ++it) {
             const Toast& toast = *it;
+            int toast_width = calculate_toast_width(toast);
             int toast_height = calculate_toast_height(toast);
             toast_y -= toast_height + TOAST_SPACING;
 
             render_toast(renderer, texture_cache, toast,
-                        window_w - TOAST_WIDTH - TOAST_MARGIN, toast_y,
-                        TOAST_WIDTH, toast_height, now);
+                        window_w - toast_width - TOAST_MARGIN, toast_y,
+                        toast_width, toast_height, now);
         }
     }
 
     bool empty() const { return toasts_.empty(); }
 
 private:
-    static constexpr int TOAST_WIDTH = 380;
+    static constexpr int TOAST_MIN_WIDTH = 280;
+    static constexpr int TOAST_MAX_WIDTH = 500;
     static constexpr int TOAST_MARGIN = 16;
     static constexpr int TOAST_SPACING = 10;
     static constexpr int TOAST_PADDING = 16;
@@ -133,8 +138,28 @@ private:
 
     std::vector<Toast> toasts_;
     const Layout* layout_ = nullptr;
+    TTF_Font* font_ = nullptr;
     int next_id_ = 0;
     int line_height_ = 22;
+
+    int calculate_toast_width(const Toast& toast) const {
+        if (!font_) return TOAST_MIN_WIDTH;
+
+        int extra = TOAST_INDICATOR_WIDTH + TOAST_PADDING * 2 + TOAST_ICON_SIZE;
+        int title_w = 0, message_w = 0;
+
+        if (!toast.title.empty()) {
+            TTF_SizeUTF8(font_, toast.title.c_str(), &title_w, nullptr);
+        }
+        if (!toast.message.empty()) {
+            TTF_SizeUTF8(font_, toast.message.c_str(), &message_w, nullptr);
+        }
+
+        int text_w = std::max(title_w, message_w);
+        int total_w = extra + text_w;
+
+        return std::clamp(total_w, TOAST_MIN_WIDTH, TOAST_MAX_WIDTH);
+    }
 
     int calculate_toast_height(const Toast& toast) const {
         int content_height = 0;

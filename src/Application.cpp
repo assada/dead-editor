@@ -92,6 +92,7 @@ void Application::init_ui() {
 
     command_bar.set_layout(&layout);
     toast_manager.set_layout(&layout);
+    toast_manager.set_font(font_manager.get());
 
     setup_actions();
 
@@ -1061,6 +1062,7 @@ void Application::on_font_changed() {
     tab_bar.invalidate_all_caches();
     menu_bar.set_font(font_manager.get());
     context_menu.set_font(font_manager.get());
+    toast_manager.set_font(font_manager.get());
     for (int i = 0; i < tab_bar.get_tab_count(); i++) {
         if (auto* tab = tab_bar.get_tab_mut(i)) {
             tab->editor->set_line_height(font_manager.get_line_height());
