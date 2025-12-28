@@ -184,8 +184,9 @@ private:
     std::string input_buffer_;
     std::vector<SearchResult> results_;
     mutable std::mutex results_mutex_;
-    std::jthread search_thread_;
+    std::thread search_thread_;
     std::atomic<bool> searching_{false};
+    std::atomic<bool> stop_requested_{false};
     std::atomic<SearchState> state_{SearchState::Idle};
     int selected_idx_ = 0;
     int scroll_offset_ = 0;
@@ -217,6 +218,7 @@ private:
         if (input_buffer_.size() < MIN_QUERY_LENGTH) return;
 
         searching_ = true;
+        stop_requested_ = false;
         state_ = SearchState::Searching;
 
         {
@@ -229,21 +231,20 @@ private:
         std::string query = input_buffer_;
         std::string root = root_path_;
 
-        search_thread_ = std::jthread([this, query, root](std::stop_token stop_token) {
-            execute_search(query, root, stop_token);
+        search_thread_ = std::thread([this, query, root]() {
+            execute_search(query, root);
         });
     }
 
     void cancel_search() {
+        stop_requested_ = true;
         searching_ = false;
         if (search_thread_.joinable()) {
-            search_thread_.request_stop();
             search_thread_.join();
         }
     }
 
-    void execute_search(const std::string& query, const std::string& root,
-                        std::stop_token stop_token) {
+    void execute_search(const std::string& query, const std::string& root) {
         std::string escaped_query = escape_shell_arg(query);
         std::string cmd = std::format(
             "rg --vimgrep --sortr=accessed --no-heading --smart-case --color never --max-count 100 "
@@ -263,7 +264,7 @@ private:
         batch.reserve(BATCH_SIZE);
         size_t total_count = 0;
 
-        while (fgets(buffer, sizeof(buffer), pipe.get()) && !stop_token.stop_requested()) {
+        while (fgets(buffer, sizeof(buffer), pipe.get()) && !stop_requested_.load()) {
             if (total_count >= MAX_RESULTS) break;
 
             std::string line(buffer);
@@ -286,7 +287,7 @@ private:
             }
         }
 
-        if (!batch.empty() && !stop_token.stop_requested()) {
+        if (!batch.empty() && !stop_requested_.load()) {
             std::lock_guard lock(results_mutex_);
             results_.insert(results_.end(),
                            std::make_move_iterator(batch.begin()),
