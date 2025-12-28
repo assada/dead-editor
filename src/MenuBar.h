@@ -19,7 +19,12 @@ enum class MenuAction {
     OpenFolder,
     Exit,
     About,
-    Keymap
+    Keymap,
+    GitCommit,
+    GitPull,
+    GitPush,
+    GitResetHard,
+    GitCheckout
 };
 
 struct MenuContext {
@@ -29,6 +34,11 @@ struct MenuContext {
     std::function<void(const std::string&)> open_folder;
     std::function<void()> exit_app;
     std::function<void(const std::string&, const std::string&)> open_virtual_file;
+    std::function<void()> git_commit;
+    std::function<void()> git_pull;
+    std::function<void()> git_push;
+    std::function<void()> git_reset_hard;
+    std::function<void()> git_checkout;
 };
 
 struct MenuItem {
@@ -43,6 +53,7 @@ struct Menu {
     std::vector<MenuItem> items;
     int x_offset = 0;
     int width = 0;
+    int dropdown_width = 0;
 };
 
 class MenuBar {
@@ -68,6 +79,17 @@ private:
         };
         menus.push_back(file_menu);
 
+        Menu git_menu;
+        git_menu.label = "Git";
+        git_menu.items = {
+            {"Commit...", "Ctrl+K", MenuAction::GitCommit, false},
+            {"Pull", "", MenuAction::GitPull, false},
+            {"Push", "", MenuAction::GitPush, true},
+            {"Checkout...", "", MenuAction::GitCheckout, true},
+            {"Reset (Hard)", "", MenuAction::GitResetHard, false}
+        };
+        menus.push_back(git_menu);
+
         Menu help_menu;
         help_menu.label = "Help";
         help_menu.items = {
@@ -79,12 +101,26 @@ private:
 
     void calculate_positions() {
         int x = L->menu_item_padding;
+        constexpr int SHORTCUT_GAP = 30;
+
         for (auto& menu : menus) {
             int text_w = 0;
             TTF_SizeUTF8(font, menu.label.c_str(), &text_w, nullptr);
             menu.x_offset = x;
             menu.width = text_w + L->menu_item_padding * 2;
             x += menu.width;
+
+            int max_item_w = 0;
+            for (const auto& item : menu.items) {
+                int label_w = 0, shortcut_w = 0;
+                TTF_SizeUTF8(font, item.label.c_str(), &label_w, nullptr);
+                if (!item.shortcut.empty()) {
+                    TTF_SizeUTF8(font, item.shortcut.c_str(), &shortcut_w, nullptr);
+                }
+                int total = label_w + (shortcut_w > 0 ? shortcut_w + SHORTCUT_GAP : 0);
+                max_item_w = std::max(max_item_w, total);
+            }
+            menu.dropdown_width = max_item_w + L->menu_item_padding * 2;
         }
     }
 
@@ -122,6 +158,21 @@ private:
                 break;
             case MenuAction::Keymap:
                 if (ctx.open_virtual_file) ctx.open_virtual_file("Keymap", HelpContent::KEYMAP);
+                break;
+            case MenuAction::GitCommit:
+                if (ctx.git_commit) ctx.git_commit();
+                break;
+            case MenuAction::GitPull:
+                if (ctx.git_pull) ctx.git_pull();
+                break;
+            case MenuAction::GitPush:
+                if (ctx.git_push) ctx.git_push();
+                break;
+            case MenuAction::GitResetHard:
+                if (ctx.git_reset_hard) ctx.git_reset_hard();
+                break;
+            case MenuAction::GitCheckout:
+                if (ctx.git_checkout) ctx.git_checkout();
                 break;
             default:
                 break;
@@ -190,7 +241,7 @@ public:
                 const MenuItem& item = menu.items[i];
                 int item_h = L->menu_dropdown_item_height;
 
-                if (mouse_x >= dropdown_x && mouse_x < dropdown_x + L->menu_dropdown_width &&
+                if (mouse_x >= dropdown_x && mouse_x < dropdown_x + menu.dropdown_width &&
                     mouse_y >= item_y && mouse_y < item_y + item_h) {
                     MenuAction action = item.action;
                     close();
@@ -240,7 +291,7 @@ public:
                 const MenuItem& item = menu.items[i];
                 int item_h = L->menu_dropdown_item_height;
 
-                if (mouse_x >= dropdown_x && mouse_x < dropdown_x + L->menu_dropdown_width &&
+                if (mouse_x >= dropdown_x && mouse_x < dropdown_x + menu.dropdown_width &&
                     mouse_y >= item_y && mouse_y < item_y + item_h) {
                     hovered_item = i;
                     return;
@@ -304,7 +355,7 @@ private:
         }
 
         SDL_SetRenderDrawColor(renderer, MENU_DROPDOWN_BG.r, MENU_DROPDOWN_BG.g, MENU_DROPDOWN_BG.b, 255);
-        SDL_Rect dropdown_bg = {dropdown_x, dropdown_y, L->menu_dropdown_width, dropdown_height};
+        SDL_Rect dropdown_bg = {dropdown_x, dropdown_y, menu.dropdown_width, dropdown_height};
         SDL_RenderFillRect(renderer, &dropdown_bg);
 
         SDL_SetRenderDrawColor(renderer, MENU_SEPARATOR.r, MENU_SEPARATOR.g, MENU_SEPARATOR.b, 255);
@@ -318,7 +369,7 @@ private:
             if (is_hovered) {
                 SDL_SetRenderDrawColor(renderer, MENU_DROPDOWN_HOVER.r, MENU_DROPDOWN_HOVER.g,
                                        MENU_DROPDOWN_HOVER.b, 255);
-                SDL_Rect item_bg = {dropdown_x + 1, item_y, L->menu_dropdown_width - 2, L->menu_dropdown_item_height};
+                SDL_Rect item_bg = {dropdown_x + 1, item_y, menu.dropdown_width - 2, L->menu_dropdown_item_height};
                 SDL_RenderFillRect(renderer, &item_bg);
             }
 
@@ -327,7 +378,7 @@ private:
                                              dropdown_x + L->menu_item_padding, text_y);
 
             if (!item.shortcut.empty()) {
-                int shortcut_x = dropdown_x + L->menu_dropdown_width - L->menu_item_padding;
+                int shortcut_x = dropdown_x + menu.dropdown_width - L->menu_item_padding;
                 texture_cache.render_cached_text_right_aligned(item.shortcut.c_str(), MENU_TEXT_DIM,
                                                                shortcut_x, text_y);
             }
@@ -338,7 +389,7 @@ private:
                 int sep_y = item_y + L->scaled(3);
                 SDL_SetRenderDrawColor(renderer, MENU_SEPARATOR.r, MENU_SEPARATOR.g, MENU_SEPARATOR.b, 255);
                 SDL_RenderDrawLine(renderer, dropdown_x + L->scaled(8), sep_y,
-                                   dropdown_x + L->menu_dropdown_width - L->scaled(8), sep_y);
+                                   dropdown_x + menu.dropdown_width - L->scaled(8), sep_y);
                 item_y += L->scaled(6);
             }
         }

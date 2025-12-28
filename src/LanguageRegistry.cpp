@@ -508,7 +508,15 @@ void register_all_languages() {
         {"cpp", "cc", "cxx", "hpp", "hxx", "h", "hh", "ipp", "tpp"},
         {},
         []() -> LanguageConfig {
-            return {"cpp", tree_sitter_cpp, CPP_QUERY, "//"};
+            return {
+                "cpp",
+                tree_sitter_cpp,
+                CPP_QUERY,
+                "//",
+                {"/*", "*/"},
+                DEFAULT_AUTO_PAIRS,
+                {'{'}
+            };
         }
     });
 
@@ -517,7 +525,15 @@ void register_all_languages() {
         {"c"},
         {},
         []() -> LanguageConfig {
-            return {"c", tree_sitter_c, C_QUERY, "//"};
+            return {
+                "c",
+                tree_sitter_c,
+                C_QUERY,
+                "//",
+                {"/*", "*/"},
+                DEFAULT_AUTO_PAIRS,
+                {'{'}
+            };
         }
     });
 
@@ -526,7 +542,15 @@ void register_all_languages() {
         {"py", "pyw", "pyi"},
         {},
         []() -> LanguageConfig {
-            return {"python", tree_sitter_python, PYTHON_QUERY, "#"};
+            return {
+                "python",
+                tree_sitter_python,
+                PYTHON_QUERY,
+                "#",
+                {"\"\"\"", "\"\"\""},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
+                {':'}
+            };
         }
     });
 
@@ -538,7 +562,7 @@ void register_all_languages() {
     //     {"md", "markdown", "mkd", "mkdn"},
     //     {"README", "CHANGELOG"},
     //     []() -> LanguageConfig {
-    //         return {"markdown", tree_sitter_markdown, MARKDOWN_QUERY, ""};
+    //         return {"markdown", tree_sitter_markdown, MARKDOWN_QUERY, "", {}, {}, {}};
     //     }
     // });
 
@@ -547,7 +571,15 @@ void register_all_languages() {
         {"yaml", "yml"},
         {},
         []() -> LanguageConfig {
-            return {"yaml", tree_sitter_yaml, YAML_QUERY, "#"};
+            return {
+                "yaml",
+                tree_sitter_yaml,
+                YAML_QUERY,
+                "#",
+                {},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
+                {':'}
+            };
         }
     });
 
@@ -556,7 +588,15 @@ void register_all_languages() {
         {"lua"},
         {},
         []() -> LanguageConfig {
-            return {"lua", tree_sitter_lua, LUA_QUERY, "--"};
+            return {
+                "lua",
+                tree_sitter_lua,
+                LUA_QUERY,
+                "--",
+                {"--[[", "]]"},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
+                {}
+            };
         }
     });
 
@@ -565,7 +605,15 @@ void register_all_languages() {
         {"zig"},
         {},
         []() -> LanguageConfig {
-            return {"zig", tree_sitter_zig, ZIG_QUERY, "//"};
+            return {
+                "zig",
+                tree_sitter_zig,
+                ZIG_QUERY,
+                "//",
+                {},
+                DEFAULT_AUTO_PAIRS,
+                {'{'}
+            };
         }
     });
 
@@ -574,7 +622,15 @@ void register_all_languages() {
         {"diff", "patch"},
         {},
         []() -> LanguageConfig {
-            return {"diff", tree_sitter_diff, DIFF_QUERY, ""};
+            return {
+                "diff",
+                tree_sitter_diff,
+                DIFF_QUERY,
+                "",
+                {},
+                {},
+                {}
+            };
         }
     });
 
@@ -583,7 +639,15 @@ void register_all_languages() {
         {},
         {"meson.build", "meson_options.txt"},
         []() -> LanguageConfig {
-            return {"meson", tree_sitter_meson, MESON_QUERY, "#"};
+            return {
+                "meson",
+                tree_sitter_meson,
+                MESON_QUERY,
+                "#",
+                {},
+                {{'(', ')'}, {'[', ']'}, {'\'', '\''}},
+                {}
+            };
         }
     });
 
@@ -592,7 +656,15 @@ void register_all_languages() {
         {"toml"},
         {"Cargo.toml", "pyproject.toml"},
         []() -> LanguageConfig {
-            return {"toml", tree_sitter_toml, TOML_QUERY, "#"};
+            return {
+                "toml",
+                tree_sitter_toml,
+                TOML_QUERY,
+                "#",
+                {},
+                {{'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
+                {}
+            };
         }
     });
 
@@ -601,7 +673,15 @@ void register_all_languages() {
         {"json", "jsonc"},
         {"package.json", "tsconfig.json", ".prettierrc", ".eslintrc"},
         []() -> LanguageConfig {
-            return {"json", tree_sitter_json, JSON_QUERY, ""};
+            return {
+                "json",
+                tree_sitter_json,
+                JSON_QUERY,
+                "",
+                {},
+                {{'[', ']'}, {'{', '}'}, {'"', '"'}},
+                {'{', '['}
+            };
         }
     });
 
@@ -610,7 +690,15 @@ void register_all_languages() {
         {"js", "mjs", "cjs", "jsx"},
         {},
         []() -> LanguageConfig {
-            return {"javascript", tree_sitter_javascript, JAVASCRIPT_QUERY, "//"};
+            return {
+                "javascript",
+                tree_sitter_javascript,
+                JAVASCRIPT_QUERY,
+                "//",
+                {"/*", "*/"},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}, {'`', '`'}},
+                {'{'}
+            };
         }
     });
 
@@ -619,7 +707,15 @@ void register_all_languages() {
         {"html", "htm", "xhtml"},
         {},
         []() -> LanguageConfig {
-            return {"html", tree_sitter_html, HTML_QUERY, ""};
+            return {
+                "html",
+                tree_sitter_html,
+                HTML_QUERY,
+                "",
+                {"<!--", "-->"},
+                {{'<', '>'}, {'"', '"'}, {'\'', '\''}},
+                {}
+            };
         }
     });
 
@@ -628,7 +724,15 @@ void register_all_languages() {
         {"css"},
         {},
         []() -> LanguageConfig {
-            return {"css", tree_sitter_css, CSS_QUERY, ""};
+            return {
+                "css",
+                tree_sitter_css,
+                CSS_QUERY,
+                "",
+                {"/*", "*/"},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
+                {'{'}
+            };
         }
     });
 }

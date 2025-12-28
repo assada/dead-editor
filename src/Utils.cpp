@@ -298,3 +298,20 @@ std::string get_config_path(const std::string& filename) {
 
     return config_dir + "/" + filename;
 }
+
+void open_containing_folder(const std::string& path) {
+    std::filesystem::path fs_path(path);
+    std::string folder = fs_path.parent_path().string();
+    if (std::filesystem::is_directory(fs_path)) {
+        folder = fs_path.string();
+    }
+
+#ifdef __APPLE__
+    std::string cmd = "open \"" + folder + "\"";
+#elif defined(_WIN32)
+    std::string cmd = "explorer \"" + folder + "\"";
+#else
+    std::string cmd = "xdg-open \"" + folder + "\" &";
+#endif
+    system(cmd.c_str());
+}

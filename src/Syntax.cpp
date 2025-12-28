@@ -362,6 +362,23 @@ const std::string& SyntaxHighlighter::get_line_comment_token() const {
     return current_language->config.line_comment_token;
 }
 
+const BlockComment& SyntaxHighlighter::get_block_comment() const {
+    static const BlockComment empty;
+    if (!current_language) return empty;
+    return current_language->config.block_comment;
+}
+
+const std::vector<AutoPair>& SyntaxHighlighter::get_auto_pairs() const {
+    if (!current_language) return DEFAULT_AUTO_PAIRS;
+    const auto& pairs = current_language->config.auto_pairs;
+    return pairs.empty() ? DEFAULT_AUTO_PAIRS : pairs;
+}
+
+const std::vector<char>& SyntaxHighlighter::get_indent_triggers() const {
+    if (!current_language) return DEFAULT_INDENT_TRIGGERS;
+    return current_language->config.indent_triggers;
+}
+
 bool SyntaxHighlighter::has_language() const {
     return current_language != nullptr;
 }

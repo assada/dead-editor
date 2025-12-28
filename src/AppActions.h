@@ -28,6 +28,8 @@ struct AppActionContext {
     std::function<void()> terminal_paste;
 
     std::function<void()> quit;
+
+    std::function<void()> git_commit;
 };
 
 class AppActions {
@@ -131,6 +133,11 @@ public:
             return {true, false};
         });
 
+        registry_.register_action(Actions::Git::Commit, [this]() -> ActionResult {
+            if (ctx_.git_commit) ctx_.git_commit();
+            return {true, false};
+        });
+
         setup_default_bindings();
     }
 
@@ -142,7 +149,7 @@ private:
         mapper_.bind({SDLK_f, KeyMod::Ctrl}, Search, InputContext::Editor);
         mapper_.bind({SDLK_g, KeyMod::Ctrl}, GoToLine, InputContext::Editor);
         mapper_.bind({SDLK_F3, KeyMod::None}, FindNext, InputContext::Editor);
-        mapper_.bind({SDLK_q, KeyMod::Ctrl}, Quit, InputContext::Editor);
+        mapper_.bind({SDLK_q, KeyMod::Ctrl}, Quit, InputContext::Global);
 
         mapper_.bind({SDLK_e, KeyMod::Ctrl}, ToggleFocus, InputContext::Global);
         mapper_.bind({SDLK_BACKQUOTE, KeyMod::Ctrl}, FocusTerminal, InputContext::Global);
@@ -163,6 +170,8 @@ private:
         mapper_.bind({SDLK_UP, KeyMod::CtrlShift}, TerminalResizeUp, InputContext::Terminal);
         mapper_.bind({SDLK_DOWN, KeyMod::CtrlShift}, TerminalResizeDown, InputContext::Terminal);
         mapper_.bind({SDLK_v, KeyMod::CtrlShift}, TerminalPaste, InputContext::Terminal);
+
+        mapper_.bind({SDLK_k, KeyMod::Ctrl}, Actions::Git::Commit, InputContext::Global);
     }
 
     ActionRegistry& registry_;

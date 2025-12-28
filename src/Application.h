@@ -13,6 +13,7 @@
 #include "TabBar.h"
 #include "CommandBar.h"
 #include "MenuBar.h"
+#include "ContextMenu.h"
 #include "Types.h"
 #include "InputMapper.h"
 #include "ActionRegistry.h"
@@ -51,6 +52,7 @@ private:
     void action_close_tab(int index);
     void action_create_node(const std::string& base_path, const std::string& name);
     void action_delete_node(const std::string& path);
+    void action_rename_node(const std::string& old_path, const std::string& new_name);
 
     void toggle_terminal();
     void toggle_focus();
@@ -82,6 +84,7 @@ private:
     FileTree file_tree;
     TerminalEmulator terminal;
     CommandBar command_bar;
+    ContextMenu context_menu;
 
     FocusPanel focus = FocusPanel::Editor;
     FocusPanel focus_before_terminal = FocusPanel::Editor;

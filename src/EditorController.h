@@ -5,6 +5,7 @@
 #include "EditorView.h"
 #include "CommandManager.h"
 #include "Constants.h"
+#include "LanguageRegistry.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
@@ -101,9 +102,9 @@ public:
 
 private:
     bool is_word_char_at(const std::string& str, ColIdx pos) const;
-    char get_closing_pair(char c);
-    bool is_closing_char(char c);
-    char get_opening_pair(char c);
+    char get_closing_pair(char c, const std::vector<AutoPair>& pairs);
+    bool is_closing_char(char c, const std::vector<AutoPair>& pairs);
+    char get_opening_pair(char c, const std::vector<AutoPair>& pairs);
 
     bool is_identifier_node(TSNode node) const;
     std::string get_node_text(TSNode node, const TextDocument& doc) const;

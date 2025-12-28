@@ -83,6 +83,9 @@ void Application::init_ui() {
     menu_bar.set_layout(&layout);
     menu_bar.set_font(font_manager.get());
 
+    context_menu.set_layout(&layout);
+    context_menu.set_font(font_manager.get());
+
     texture_cache.init(renderer.get(), font_manager.get());
     terminal_height = layout.scaled(250);
     tree_width = layout.file_tree_width;
@@ -109,6 +112,27 @@ void Application::init_ui() {
                 focus = FocusPanel::Editor;
                 texture_cache.invalidate_all();
             }
+        },
+        .git_commit = [this]() {
+            if (file_tree.is_git_repo()) command_bar.start_git_commit();
+        },
+        .git_pull = [this]() {
+            if (file_tree.is_git_repo()) {
+                git_pull(file_tree.root_path);
+                file_tree.refresh_git_status_async();
+            }
+        },
+        .git_push = [this]() {
+            if (file_tree.is_git_repo()) git_push(file_tree.root_path);
+        },
+        .git_reset_hard = [this]() {
+            if (file_tree.is_git_repo()) {
+                git_reset_hard(file_tree.root_path);
+                file_tree.refresh_git_status_async();
+            }
+        },
+        .git_checkout = [this]() {
+            if (file_tree.is_git_repo()) command_bar.start_git_checkout();
         }
     });
 
@@ -319,7 +343,10 @@ void Application::setup_actions() {
                 SDL_free(clipboard);
             }
         },
-        .quit = [this]() { running = false; }
+        .quit = [this]() { running = false; },
+        .git_commit = [this]() {
+            if (file_tree.is_git_repo()) command_bar.start_git_commit();
+        }
     });
 
     filetree_actions_ = std::make_unique<FileTreeActions>(action_registry, input_mapper);
@@ -356,6 +383,9 @@ void Application::handle_command_bar_key(const SDL_Event& event) {
             case CommandMode::Create:
                 action_create_node(result.path, result.input);
                 break;
+            case CommandMode::Rename:
+                action_rename_node(result.path, result.input);
+                break;
             case CommandMode::GoTo:
                 if (auto* ed = tab_bar.get_active_editor()) {
                     ed->go_to(result.pos);
@@ -377,6 +407,18 @@ void Application::handle_command_bar_key(const SDL_Event& event) {
                 if (!tab_bar.has_tabs()) focus = FocusPanel::FileTree;
                 break;
             }
+            case CommandMode::GitCommit:
+                if (!result.input.empty() && file_tree.is_git_repo()) {
+                    git_commit(file_tree.root_path, result.input);
+                    file_tree.refresh_git_status_async();
+                }
+                break;
+            case CommandMode::GitCheckout:
+                if (!result.input.empty() && file_tree.is_git_repo()) {
+                    git_checkout(file_tree.root_path, result.input);
+                    file_tree.refresh_git_status_async();
+                }
+                break;
             default:
                 break;
         }
@@ -422,7 +464,15 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
     }
 
     if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+        if (context_menu.is_open()) {
+            context_menu.handle_mouse_click(mx, my);
+            file_tree.context_menu_index = -1;
+            return;
+        }
+
         if (menu_bar.handle_mouse_click(mx, my)) {
+            context_menu.close();
+            file_tree.context_menu_index = -1;
             menu_click_consumed = true;
             return;
         }
@@ -444,7 +494,7 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
             int editor_y = layout.menu_bar_height + tab_h;
 
             if (tab_bar.has_tabs() && mx >= tree_w && my >= layout.menu_bar_height && my < editor_y) {
-                auto click = tab_bar.handle_mouse_click(mx - tree_w, my - layout.menu_bar_height);
+                auto click = tab_bar.handle_mouse_click(mx - tree_w, my - layout.menu_bar_height, false);
                 if (click.action == TabAction::SwitchTab) {
                     tab_bar.switch_to_tab(click.tab_index);
                     if (auto* ed = tab_bar.get_active_editor()) {
@@ -494,6 +544,131 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         return;
     }
 
+    if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT) {
+        if (context_menu.is_open()) {
+            context_menu.close();
+            file_tree.context_menu_index = -1;
+        }
+
+        int editor_y = layout.menu_bar_height + tab_h;
+        if (tab_bar.has_tabs() && mx >= tree_w && my >= layout.menu_bar_height && my < editor_y) {
+            auto click = tab_bar.handle_mouse_click(mx - tree_w, my - layout.menu_bar_height, true);
+            if (click.action == TabAction::ShowContextMenu) {
+                int clicked_tab = click.tab_index;
+                std::vector<ContextMenuItem> items;
+
+                items.push_back({"Close", [this, clicked_tab]() {
+                    action_close_tab(clicked_tab);
+                }, true, false});
+
+                bool has_others = tab_bar.get_tab_count() > 1;
+                items.push_back({"Close Others", [this, clicked_tab]() {
+                    auto others = tab_bar.get_other_tabs(clicked_tab);
+                    tab_bar.close_tabs(others);
+                    if (!tab_bar.has_tabs()) {
+                        focus = FocusPanel::FileTree;
+                        update_title();
+                    }
+                }, has_others, false});
+
+                items.push_back({"Close All", [this]() {
+                    auto all = tab_bar.get_all_tabs();
+                    tab_bar.close_tabs(all);
+                    if (!tab_bar.has_tabs()) {
+                        focus = FocusPanel::FileTree;
+                        update_title();
+                    }
+                }, true, true});
+
+                auto saved = tab_bar.get_saved_tabs();
+                items.push_back({"Close Saved", [this]() {
+                    auto saved_tabs = tab_bar.get_saved_tabs();
+                    tab_bar.close_tabs(saved_tabs);
+                    if (!tab_bar.has_tabs()) {
+                        focus = FocusPanel::FileTree;
+                        update_title();
+                    }
+                }, !saved.empty(), false});
+
+                context_menu.show(mx, my, std::move(items), window_w, window_h);
+            }
+            return;
+        }
+
+        if (file_tree.is_loaded() && mx < tree_w && my >= layout.menu_bar_height && my < term_y) {
+            int local_y = my - layout.menu_bar_height;
+            int node_index = file_tree.get_index_at_position(local_y, font_manager.get_line_height());
+            FileTreeNode* node = node_index >= 0 ? file_tree.get_node_at_position(local_y, font_manager.get_line_height()) : nullptr;
+            file_tree.context_menu_index = node_index;
+            std::vector<ContextMenuItem> items;
+
+            if (node) {
+                std::string base_path = node->is_directory
+                    ? node->full_path
+                    : std::filesystem::path(node->full_path).parent_path().string();
+
+                items.push_back({"New File...", [this, base_path]() {
+                    command_bar.start_create(base_path);
+                }, true, false});
+
+                bool can_modify = node->full_path != file_tree.root_path;
+                items.push_back({"Rename...", [this, path = node->full_path, name = node->name]() {
+                    command_bar.start_rename(path, name);
+                }, can_modify, false});
+
+                items.push_back({"Delete", [this, path = node->full_path, name = node->name]() {
+                    command_bar.start_delete(path, name);
+                }, can_modify, true});
+
+                items.push_back({"Copy Path", [path = node->full_path]() {
+                    SDL_SetClipboardText(path.c_str());
+                }, true, false});
+
+                std::string relative_path = node->full_path;
+                if (relative_path.find(file_tree.root_path) == 0) {
+                    relative_path = relative_path.substr(file_tree.root_path.size());
+                    if (!relative_path.empty() && relative_path[0] == '/') {
+                        relative_path = relative_path.substr(1);
+                    }
+                }
+                items.push_back({"Copy Relative Path", [relative_path]() {
+                    SDL_SetClipboardText(relative_path.c_str());
+                }, true, false});
+
+                items.push_back({"Open Containing Folder", [path = node->full_path]() {
+                    open_containing_folder(path);
+                }, true, true});
+
+                if (file_tree.is_git_repo()) {
+                    bool is_staged = file_tree.is_file_staged(node->full_path);
+                    bool is_untracked = file_tree.is_file_untracked(node->full_path);
+                    bool is_modified = file_tree.is_file_modified(node->full_path);
+
+                    if (is_untracked || is_modified || !is_staged) {
+                        items.push_back({"Git Add", [this, path = node->full_path]() {
+                            git_add(file_tree.root_path, path);
+                            file_tree.refresh_git_status_async();
+                        }, true, false});
+                    }
+
+                    if (is_staged) {
+                        items.push_back({"Git Unstage", [this, path = node->full_path]() {
+                            git_unstage(file_tree.root_path, path);
+                            file_tree.refresh_git_status_async();
+                        }, true, false});
+                    }
+                }
+            } else {
+                items.push_back({"New File...", [this]() {
+                    command_bar.start_create(file_tree.root_path);
+                }, true, false});
+            }
+
+            context_menu.show(mx, my, std::move(items), window_w, window_h);
+        }
+        return;
+    }
+
     if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
         if (auto* ed = tab_bar.get_active_editor()) {
             ed->handle_mouse_up();
@@ -518,6 +693,10 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
     if (event.type == SDL_MOUSEMOTION) {
         int motion_x = layout.mouse_x(event.motion.x);
         int motion_y = layout.mouse_y(event.motion.y);
+
+        if (context_menu.is_open()) {
+            context_menu.handle_mouse_motion(motion_x, motion_y);
+        }
 
         if (dragging.terminal) {
             int new_h = window_h - layout.status_bar_height - motion_y;
@@ -632,6 +811,7 @@ void Application::render() {
     }
 
     menu_bar.render_dropdown_overlay(renderer.get(), texture_cache, line_h);
+    context_menu.render(renderer.get(), texture_cache, line_h);
 
     SDL_RenderPresent(renderer.get());
 }
@@ -743,6 +923,44 @@ void Application::action_delete_node(const std::string& path) {
     } catch (...) {}
 }
 
+void Application::action_rename_node(const std::string& old_path, const std::string& new_name) {
+    try {
+        std::filesystem::path old_fs_path(old_path);
+        std::filesystem::path new_fs_path = old_fs_path.parent_path() / new_name;
+        std::string new_path = new_fs_path.string();
+
+        std::filesystem::rename(old_fs_path, new_fs_path);
+
+        for (int i = 0; i < tab_bar.get_tab_count(); i++) {
+            if (Tab* tab = tab_bar.get_tab_mut(i)) {
+                if (!tab->get_path().empty()) {
+                    std::string tab_path = tab->get_path();
+                    if (tab_path == old_path) {
+                        tab->editor->set_file_path(new_path);
+                        tab->update_title();
+                    } else if (tab_path.find(old_path + "/") == 0) {
+                        std::string relative = tab_path.substr(old_path.size());
+                        tab->editor->set_file_path(new_path + relative);
+                        tab->update_title();
+                    }
+                }
+            }
+        }
+
+        file_tree.save_expanded_state();
+        file_tree.load_directory(file_tree.root_path);
+        file_tree.restore_expanded_state();
+        file_tree.rebuild_visible();
+        file_tree.expand_and_select_path(new_path);
+
+        texture_cache.invalidate_all();
+
+        if (auto* ed = tab_bar.get_active_editor()) {
+            update_title(ed->get_file_path());
+        }
+    } catch (...) {}
+}
+
 void Application::toggle_terminal() {
     show_terminal = !show_terminal;
     if (show_terminal) {
@@ -814,6 +1032,7 @@ void Application::on_font_changed() {
     tab_bar.set_font(font_manager.get());
     tab_bar.invalidate_all_caches();
     menu_bar.set_font(font_manager.get());
+    context_menu.set_font(font_manager.get());
     for (int i = 0; i < tab_bar.get_tab_count(); i++) {
         if (auto* tab = tab_bar.get_tab_mut(i)) {
             tab->editor->set_line_height(font_manager.get_line_height());

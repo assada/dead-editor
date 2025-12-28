@@ -131,8 +131,6 @@ private:
                 tree_->clear_filter_and_select(nullptr);
             } else if (has_open_file_()) {
                 if (ctx_.focus_editor) ctx_.focus_editor();
-            } else {
-                if (ctx_.quit) ctx_.quit();
             }
             return {true, false};
         });

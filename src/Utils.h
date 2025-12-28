@@ -29,3 +29,4 @@ bool is_word_codepoint(uint32_t cp);
 bool is_directory(const char* path);
 std::string get_resource_path(const std::string& filename);
 std::string get_config_path(const std::string& filename);
+void open_containing_folder(const std::string& path);

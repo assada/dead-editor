@@ -137,18 +137,20 @@ void EditorController::insert_text(TextDocument& doc, EditorView& view, const ch
     std::string str(text);
     if (str.empty()) return;
 
+    const auto& auto_pairs = view.highlighter.get_auto_pairs();
+
     if (str.size() == 1) {
         char ch = str[0];
         const std::string& current_line = doc.lines[cursor_line];
 
-        if (is_closing_char(ch)) {
+        if (is_closing_char(ch, auto_pairs)) {
             if (cursor_col < static_cast<int>(current_line.size()) && current_line[cursor_col] == ch) {
                 cursor_col++;
                 return;
             }
         }
 
-        char closing = get_closing_pair(ch);
+        char closing = get_closing_pair(ch, auto_pairs);
         if (closing != '\0') {
             str += closing;
         }
@@ -159,7 +161,7 @@ void EditorController::insert_text(TextDocument& doc, EditorView& view, const ch
     uint64_t group = get_undo_group_id();
 
     int final_cursor_offset = 0;
-    if (str.size() == 2 && get_closing_pair(str[0]) == str[1]) {
+    if (str.size() == 2 && get_closing_pair(str[0], auto_pairs) == str[1]) {
         final_cursor_offset = 1;
     }
 
@@ -187,8 +189,15 @@ void EditorController::new_line(TextDocument& doc, EditorView& view) {
         }
     }
 
-    if (cursor_col > 0 && current_text[cursor_col - 1] == '{') {
-        indent += "    ";
+    const auto& indent_triggers = view.highlighter.get_indent_triggers();
+    if (cursor_col > 0 && !indent_triggers.empty()) {
+        char prev_char = current_text[cursor_col - 1];
+        for (char trigger : indent_triggers) {
+            if (prev_char == trigger) {
+                indent += "    ";
+                break;
+            }
+        }
     }
 
     int start_line_pos = cursor_line;
@@ -217,12 +226,13 @@ void EditorController::backspace(TextDocument& doc, EditorView& view) {
     if (cursor_col > 0) {
         int prev_pos = utf8_prev_char_start(doc.lines[cursor_line], cursor_col);
         const std::string& current_line = doc.lines[cursor_line];
+        const auto& auto_pairs = view.highlighter.get_auto_pairs();
 
         bool delete_pair = false;
         if (cursor_col < static_cast<int>(current_line.size())) {
             char left_char = current_line[prev_pos];
             char right_char = current_line[cursor_col];
-            if (get_closing_pair(left_char) == right_char && right_char != '\0') {
+            if (get_closing_pair(left_char, auto_pairs) == right_char && right_char != '\0') {
                 delete_pair = true;
             }
         }
@@ -611,30 +621,25 @@ bool EditorController::find_next(const TextDocument& doc, const std::string& que
     return false;
 }
 
-char EditorController::get_closing_pair(char c) {
-    switch (c) {
-        case '(': return ')';
-        case '[': return ']';
-        case '{': return '}';
-        case '"': return '"';
-        case '\'': return '\'';
-        default: return '\0';
+char EditorController::get_closing_pair(char c, const std::vector<AutoPair>& pairs) {
+    for (const auto& pair : pairs) {
+        if (pair.open == c) return pair.close;
     }
+    return '\0';
 }
 
-bool EditorController::is_closing_char(char c) {
-    return c == ')' || c == ']' || c == '}' || c == '"' || c == '\'';
+bool EditorController::is_closing_char(char c, const std::vector<AutoPair>& pairs) {
+    for (const auto& pair : pairs) {
+        if (pair.close == c) return true;
+    }
+    return false;
 }
 
-char EditorController::get_opening_pair(char c) {
-    switch (c) {
-        case ')': return '(';
-        case ']': return '[';
-        case '}': return '{';
-        case '"': return '"';
-        case '\'': return '\'';
-        default: return '\0';
+char EditorController::get_opening_pair(char c, const std::vector<AutoPair>& pairs) {
+    for (const auto& pair : pairs) {
+        if (pair.close == c) return pair.open;
     }
+    return '\0';
 }
 
 void EditorController::select_word_at_cursor(const TextDocument& doc) {

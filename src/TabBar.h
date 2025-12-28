@@ -39,7 +39,8 @@ enum class TabAction {
     None,
     SwitchTab,
     CloseTab,
-    CloseModifiedTab
+    CloseModifiedTab,
+    ShowContextMenu
 };
 
 struct TabClickResult {
@@ -194,6 +195,49 @@ public:
         return close_tab(index);
     }
 
+    std::vector<int> get_other_tabs(int index) const {
+        std::vector<int> others;
+        for (int i = 0; i < static_cast<int>(tabs.size()); i++) {
+            if (i != index) others.push_back(i);
+        }
+        return others;
+    }
+
+    std::vector<int> get_all_tabs() const {
+        std::vector<int> all;
+        for (int i = 0; i < static_cast<int>(tabs.size()); i++) {
+            all.push_back(i);
+        }
+        return all;
+    }
+
+    std::vector<int> get_saved_tabs() const {
+        std::vector<int> saved;
+        for (int i = 0; i < static_cast<int>(tabs.size()); i++) {
+            if (!tabs[i].is_modified()) saved.push_back(i);
+        }
+        return saved;
+    }
+
+    bool has_modified_tabs_in(const std::vector<int>& indices) const {
+        for (int i : indices) {
+            if (i >= 0 && i < static_cast<int>(tabs.size()) && tabs[i].is_modified()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void close_tabs(const std::vector<int>& indices) {
+        std::vector<int> sorted = indices;
+        std::sort(sorted.rbegin(), sorted.rend());
+        for (int i : sorted) {
+            if (!tabs[i].is_modified()) {
+                close_tab(i);
+            }
+        }
+    }
+
     void switch_to_tab(int index) {
         if (index >= 0 && index < static_cast<int>(tabs.size())) {
             active_tab = index;
@@ -225,7 +269,7 @@ public:
         }
     }
 
-    TabClickResult handle_mouse_click(int mouse_x, int mouse_y) {
+    TabClickResult handle_mouse_click(int mouse_x, int mouse_y, bool right_button = false) {
         TabClickResult result;
 
         if (mouse_y < 0 || mouse_y >= L->tab_bar_height) {
@@ -237,6 +281,12 @@ public:
             int tab_w = get_tab_width(tabs[i]);
 
             if (mouse_x >= x && mouse_x < x + tab_w) {
+                if (right_button) {
+                    result.action = TabAction::ShowContextMenu;
+                    result.tab_index = i;
+                    return result;
+                }
+
                 int close_x = x + tab_w - L->tab_close_size - L->tab_close_padding / 2;
                 int close_y = (L->tab_bar_height - L->tab_close_size) / 2;
 

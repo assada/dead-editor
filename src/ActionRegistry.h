@@ -144,4 +144,12 @@ namespace Actions {
         constexpr const char* TerminalResizeDown = "app.terminal_resize_down";
         constexpr const char* TerminalPaste = "app.terminal_paste";
     }
+
+    namespace Git {
+        constexpr const char* Commit = "git.commit";
+        constexpr const char* Pull = "git.pull";
+        constexpr const char* Push = "git.push";
+        constexpr const char* ResetHard = "git.reset_hard";
+        constexpr const char* Checkout = "git.checkout";
+    }
 }

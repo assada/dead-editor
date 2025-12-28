@@ -12,7 +12,7 @@
 #include "RenderUtils.h"
 #include "TextureCache.h"
 
-enum class CommandMode { None, Search, GoTo, Create, Delete, SavePrompt };
+enum class CommandMode { None, Search, GoTo, Create, Delete, SavePrompt, Rename, GitCommit, GitCheckout };
 
 enum class CommandAction { None, Confirm, Cancel, FindNext };
 
@@ -81,6 +81,23 @@ public:
         mode = CommandMode::SavePrompt;
         input.clear();
         target_name = filename;
+    }
+
+    void start_rename(const std::string& path, const std::string& current_name) {
+        mode = CommandMode::Rename;
+        input = current_name;
+        base_path = path;
+        target_name = current_name;
+    }
+
+    void start_git_commit() {
+        mode = CommandMode::GitCommit;
+        input.clear();
+    }
+
+    void start_git_checkout() {
+        mode = CommandMode::GitCheckout;
+        input.clear();
     }
 
     void cancel() {
@@ -178,7 +195,8 @@ public:
             return result;
         }
 
-        if (mode == CommandMode::Create) {
+        if (mode == CommandMode::Create || mode == CommandMode::Rename ||
+            mode == CommandMode::GitCommit || mode == CommandMode::GitCheckout) {
             switch (event.key.keysym.sym) {
                 case SDLK_ESCAPE:
                     result.action = CommandAction::Cancel;
@@ -306,6 +324,15 @@ private:
                 break;
             case CommandMode::SavePrompt:
                 label_cache = std::format("Save changes to '{}'? (y)es / (n)o / (c)ancel", target_name);
+                break;
+            case CommandMode::Rename:
+                label_cache = std::format("Rename: {}", input);
+                break;
+            case CommandMode::GitCommit:
+                label_cache = std::format("Commit message: {}", input);
+                break;
+            case CommandMode::GitCheckout:
+                label_cache = std::format("Branch name: {}", input);
                 break;
             default:
                 label_cache.clear();

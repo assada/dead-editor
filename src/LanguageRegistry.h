@@ -10,12 +10,35 @@
 
 using LanguageFactory = const TSLanguage* (*)();
 
+struct AutoPair {
+    char open;
+    char close;
+};
+
+struct BlockComment {
+    std::string start;
+    std::string end;
+};
+
 struct LanguageConfig {
     std::string name;
     LanguageFactory factory;
     const char* query_source;
     std::string line_comment_token;
+    BlockComment block_comment;
+    std::vector<AutoPair> auto_pairs;
+    std::vector<char> indent_triggers;
 };
+
+inline const std::vector<AutoPair> DEFAULT_AUTO_PAIRS = {
+    {'(', ')'},
+    {'[', ']'},
+    {'{', '}'},
+    {'"', '"'},
+    {'\'', '\''}
+};
+
+inline const std::vector<char> DEFAULT_INDENT_TRIGGERS = {'{'};
 
 struct LanguageDefinition {
     std::string id;

@@ -13,8 +13,8 @@
 - [x] Test new file lost char
 - [x] Fix terminal cmdline spacing (s)
 - [ ] Icons?
-- [ ] Git actions? (git add, commit, pull, push, branch)
-- [ ] Context menu on right click?
+- [x] Git actions? (git add, commit, pull, push, branch)
+- [x] Context menu on right click?
 - [ ] Save cursor pos in one session
 - [ ] Theme file?
 - [ ] Configuration? Autosave.

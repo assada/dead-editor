@@ -34,6 +34,13 @@ struct GitStatus {
 
 std::string get_git_branch(const std::string& path);
 GitStatus get_git_status(const std::string& path);
+bool git_add(const std::string& repo_path, const std::string& file_path);
+bool git_unstage(const std::string& repo_path, const std::string& file_path);
+bool git_commit(const std::string& repo_path, const std::string& message);
+bool git_pull(const std::string& repo_path);
+bool git_push(const std::string& repo_path);
+bool git_reset_hard(const std::string& repo_path);
+bool git_checkout(const std::string& repo_path, const std::string& branch);
 
 struct FileTreeNode {
     std::string name;
@@ -50,6 +57,7 @@ struct FileTree {
     std::vector<FileTreeNode*> visible_nodes;
     int selected_index = 0;
     int scroll_offset = 0;
+    int context_menu_index = -1;
     bool active = false;
     std::string filter_query;
     std::vector<FileTreeNode*> filtered_nodes;
@@ -88,6 +96,8 @@ struct FileTree {
     bool is_file_modified(const std::string& path) const;
     bool is_file_untracked(const std::string& path) const;
     bool is_file_added(const std::string& path) const;
+    bool is_file_staged(const std::string& path) const;
+    bool is_git_repo() const;
     void collect_fs_snapshot(const std::string& dir_path, std::unordered_set<std::string>& snapshot);
     void scan_filesystem_async();
     void check_filesystem_changes();
@@ -126,6 +136,8 @@ struct FileTree {
     bool handle_text_input_key(const SDL_Event& event);
     void handle_mouse_click(int x, int y, int line_height);
     std::string handle_mouse_double_click(int x, int y, int line_height);
+    FileTreeNode* get_node_at_position(int y, int line_height);
+    int get_index_at_position(int y, int line_height);
     void handle_scroll(int wheel_y, int visible_lines);
     void render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& texture_cache,
                 int x, int y, int width, int height,

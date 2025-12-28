@@ -45,5 +45,8 @@ struct SyntaxHighlighter {
         std::unordered_map<LineIdx, std::vector<Token>>& result
     ) const;
     const std::string& get_line_comment_token() const;
+    const BlockComment& get_block_comment() const;
+    const std::vector<AutoPair>& get_auto_pairs() const;
+    const std::vector<char>& get_indent_triggers() const;
     bool has_language() const;
 };

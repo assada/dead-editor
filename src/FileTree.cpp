@@ -62,6 +62,48 @@ GitStatus get_git_status(const std::string& path) {
     return status;
 }
 
+bool git_add(const std::string& repo_path, const std::string& file_path) {
+    const std::string cmd = "cd \"" + repo_path + "\" && git add \"" + file_path + "\" 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
+bool git_unstage(const std::string& repo_path, const std::string& file_path) {
+    const std::string cmd = "cd \"" + repo_path + "\" && git restore --staged \"" + file_path + "\" 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
+bool git_commit(const std::string& repo_path, const std::string& message) {
+    std::string escaped_msg;
+    for (char c : message) {
+        if (c == '"' || c == '\\' || c == '$' || c == '`') {
+            escaped_msg += '\\';
+        }
+        escaped_msg += c;
+    }
+    const std::string cmd = "cd \"" + repo_path + "\" && git commit -m \"" + escaped_msg + "\" 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
+bool git_pull(const std::string& repo_path) {
+    const std::string cmd = "cd \"" + repo_path + "\" && git pull 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
+bool git_push(const std::string& repo_path) {
+    const std::string cmd = "cd \"" + repo_path + "\" && git push 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
+bool git_reset_hard(const std::string& repo_path) {
+    const std::string cmd = "cd \"" + repo_path + "\" && git reset --hard HEAD 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
+bool git_checkout(const std::string& repo_path, const std::string& branch) {
+    const std::string cmd = "cd \"" + repo_path + "\" && git checkout \"" + branch + "\" 2>/dev/null";
+    return system(cmd.c_str()) == 0;
+}
+
 void FileTree::refresh_git_status_async() {
     if (root_path.empty() || git_refresh_pending.load()) return;
     git_refresh_pending.store(true);
@@ -126,6 +168,15 @@ bool FileTree::is_file_untracked(const std::string& path) const {
 
 bool FileTree::is_file_added(const std::string& path) const {
     return git_added_files.find(path) != git_added_files.end();
+}
+
+bool FileTree::is_file_staged(const std::string& path) const {
+    return git_added_files.find(path) != git_added_files.end() ||
+           git_modified_files.find(path) != git_modified_files.end();
+}
+
+bool FileTree::is_git_repo() const {
+    return !git_branch.empty();
 }
 
 void FileTree::collect_fs_snapshot(const std::string& dir_path, std::unordered_set<std::string>& snapshot) {
@@ -733,6 +784,12 @@ void FileTree::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& text
             SDL_RenderFillRect(renderer, &sel_rect);
         }
 
+        if (idx == context_menu_index) {
+            SDL_SetRenderDrawColor(renderer, Colors::CURSOR.r, Colors::CURSOR.g, Colors::CURSOR.b, 255);
+            SDL_Rect border_rect = {x + 1, tree_y, width - 3, line_height};
+            SDL_RenderDrawRect(renderer, &border_rect);
+        }
+
         int indent = is_filtering() ? 0 : node->depth * 16;
         std::string prefix;
         if (node->is_directory) {
@@ -810,4 +867,27 @@ std::string FileTree::handle_mouse_double_click(int /* x */, int y, int line_hei
         return node->full_path;
     }
     return "";
+}
+
+FileTreeNode* FileTree::get_node_at_position(int y, int line_height) {
+    int idx = get_index_at_position(y, line_height);
+    if (idx < 0) return nullptr;
+    auto& display_nodes = is_filtering() ? filtered_nodes : visible_nodes;
+    return display_nodes[idx];
+}
+
+int FileTree::get_index_at_position(int y, int line_height) {
+    if (!is_loaded()) return -1;
+
+    int filter_bar_height = is_filtering() ? line_height + PADDING : 0;
+    int content_y_start = PADDING + filter_bar_height;
+
+    if (y < content_y_start) return -1;
+
+    int clicked_index = scroll_offset + (y - content_y_start) / line_height;
+
+    auto& display_nodes = is_filtering() ? filtered_nodes : visible_nodes;
+    if (clicked_index < 0 || clicked_index >= static_cast<int>(display_nodes.size())) return -1;
+
+    return clicked_index;
 }
