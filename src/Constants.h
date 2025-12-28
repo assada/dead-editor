@@ -95,6 +95,21 @@ namespace Colors {
 
     constexpr SDL_Color TERMINAL_DEFAULT_FG = {220, 220, 220, 255};
     constexpr SDL_Color TERMINAL_DEFAULT_BG = {18, 18, 22, 255};
+
+    constexpr SDL_Color TOAST_BG = {38, 38, 45, 245};
+    constexpr SDL_Color TOAST_BORDER = {55, 55, 65, 255};
+    constexpr SDL_Color TOAST_TEXT = {220, 220, 220, 255};
+    constexpr SDL_Color TOAST_TEXT_DIM = {160, 160, 170, 255};
+    constexpr SDL_Color TOAST_PROGRESS_BG = {30, 30, 35, 255};
+
+    constexpr SDL_Color TOAST_INFO_INDICATOR = {80, 140, 220, 255};
+    constexpr SDL_Color TOAST_INFO_ICON = {100, 160, 240, 255};
+    constexpr SDL_Color TOAST_SUCCESS_INDICATOR = {80, 180, 100, 255};
+    constexpr SDL_Color TOAST_SUCCESS_ICON = {100, 200, 120, 255};
+    constexpr SDL_Color TOAST_WARNING_INDICATOR = {220, 180, 80, 255};
+    constexpr SDL_Color TOAST_WARNING_ICON = {240, 200, 100, 255};
+    constexpr SDL_Color TOAST_ERROR_INDICATOR = {220, 80, 80, 255};
+    constexpr SDL_Color TOAST_ERROR_ICON = {240, 100, 100, 255};
 }
 
 constexpr SDL_Color TAB_BG_COLOR = {30, 30, 35, 255};

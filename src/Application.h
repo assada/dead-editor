@@ -20,6 +20,7 @@
 #include "EditorActions.h"
 #include "AppActions.h"
 #include "FileTreeActions.h"
+#include "Toast.h"
 
 class Application {
 public:
@@ -113,4 +114,6 @@ private:
     std::unique_ptr<EditorActions> editor_actions_;
     std::unique_ptr<AppActions> app_actions_;
     std::unique_ptr<FileTreeActions> filetree_actions_;
+
+    ToastManager toast_manager;
 };

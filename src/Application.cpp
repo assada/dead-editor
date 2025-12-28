@@ -91,6 +91,7 @@ void Application::init_ui() {
     tree_width = layout.file_tree_width;
 
     command_bar.set_layout(&layout);
+    toast_manager.set_layout(&layout);
 
     setup_actions();
 
@@ -118,16 +119,30 @@ void Application::init_ui() {
         },
         .git_pull = [this]() {
             if (file_tree.is_git_repo()) {
-                git_pull(file_tree.root_path);
+                if (git_pull(file_tree.root_path)) {
+                    toast_manager.show_success("Git Pull", "Successfully pulled changes");
+                } else {
+                    toast_manager.show_error("Git Pull", "Failed to pull changes");
+                }
                 file_tree.refresh_git_status_async();
             }
         },
         .git_push = [this]() {
-            if (file_tree.is_git_repo()) git_push(file_tree.root_path);
+            if (file_tree.is_git_repo()) {
+                if (git_push(file_tree.root_path)) {
+                    toast_manager.show_success("Git Push", "Successfully pushed changes");
+                } else {
+                    toast_manager.show_error("Git Push", "Failed to push changes");
+                }
+            }
         },
         .git_reset_hard = [this]() {
             if (file_tree.is_git_repo()) {
-                git_reset_hard(file_tree.root_path);
+                if (git_reset_hard(file_tree.root_path)) {
+                    toast_manager.show_warning("Git Reset", "All changes discarded");
+                } else {
+                    toast_manager.show_error("Git Reset", "Failed to reset");
+                }
                 file_tree.refresh_git_status_async();
             }
         },
@@ -155,6 +170,7 @@ void Application::run() {
 
 void Application::update() {
     command_bar.clear_just_confirmed();
+    toast_manager.update();
 
     if (show_terminal) {
         terminal.update();
@@ -403,13 +419,21 @@ void Application::handle_command_bar_key(const SDL_Event& event) {
             }
             case CommandMode::GitCommit:
                 if (!result.input.empty() && file_tree.is_git_repo()) {
-                    git_commit(file_tree.root_path, result.input);
+                    if (git_commit(file_tree.root_path, result.input)) {
+                        toast_manager.show_success("Git Commit", "Changes committed successfully");
+                    } else {
+                        toast_manager.show_error("Git Commit", "Failed to commit changes");
+                    }
                     file_tree.refresh_git_status_async();
                 }
                 break;
             case CommandMode::GitCheckout:
                 if (!result.input.empty() && file_tree.is_git_repo()) {
-                    git_checkout(file_tree.root_path, result.input);
+                    if (git_checkout(file_tree.root_path, result.input)) {
+                        toast_manager.show_success("Git Checkout", "Switched to branch: " + result.input);
+                    } else {
+                        toast_manager.show_error("Git Checkout", "Failed to checkout: " + result.input);
+                    }
                     file_tree.refresh_git_status_async();
                 }
                 break;
@@ -458,6 +482,10 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
     }
 
     if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+        if (toast_manager.handle_click(mx, my, window_w, window_h)) {
+            return;
+        }
+
         if (context_menu.is_open()) {
             context_menu.handle_mouse_click(mx, my);
             file_tree.context_menu_index = -1;
@@ -806,6 +834,7 @@ void Application::render() {
 
     menu_bar.render_dropdown_overlay(renderer.get(), texture_cache, line_h);
     context_menu.render(renderer.get(), texture_cache, line_h);
+    toast_manager.render(renderer.get(), texture_cache, window_w, window_h, line_h);
 
     SDL_RenderPresent(renderer.get());
 }
@@ -881,6 +910,7 @@ void Application::action_create_node(const std::string& base_path, const std::st
 }
 
 void Application::action_delete_node(const std::string& path) {
+    std::string node_name = std::filesystem::path(path).filename().string();
     try {
         std::vector<int> tabs_to_close;
         std::string target = std::filesystem::canonical(path).string();
@@ -914,7 +944,11 @@ void Application::action_delete_node(const std::string& path) {
             tab_bar.close_tab(tabs_to_close[i]);
         }
         if (!tab_bar.has_tabs()) focus = FocusPanel::FileTree;
-    } catch (...) {}
+
+        toast_manager.show_success("Deleted", node_name);
+    } catch (...) {
+        toast_manager.show_error("Delete Failed", node_name);
+    }
 }
 
 void Application::action_rename_node(const std::string& old_path, const std::string& new_name) {
