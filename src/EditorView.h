@@ -28,12 +28,14 @@ public:
     double target_scroll_y = 0.0;
     double velocity_y = 0.0;
 
-    double precise_scroll_x = 0.0; 
+    double precise_scroll_x = 0.0;
+    double target_scroll_x = 0.0;
     double velocity_x = 0.0;
     
     ScrollState scroll_state = ScrollState::Idle;
     Uint32 last_update_time = 0;
     Uint32 last_scroll_event_time = 0;
+    bool scroll_input_this_frame = false;
     
     int line_height = 20;
 

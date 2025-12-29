@@ -41,6 +41,9 @@ Application::~Application() {
 }
 
 void Application::init_systems() {
+#ifdef __APPLE__
+    SDL_SetHint("SDL_MAC_SCROLL_MOMENTUM", "1");
+#endif
     SDL_Init(SDL_INIT_VIDEO);
     TTF_Init();
     register_all_languages();

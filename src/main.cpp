@@ -1,7 +1,10 @@
 #include "Application.h"
+#include "PlatformInit.h"
 #include <iostream>
 
 int main(int argc, char* argv[]) {
+    platform_init();
+
     try {
         Application app(argc, argv);
         app.run();

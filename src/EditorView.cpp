@@ -397,124 +397,51 @@ void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool sh
         wheel_y = 0;
     }
 
-    Uint32 now = SDL_GetTicks();
-    float dt_ms = static_cast<float>(now - last_scroll_event_time);
+    constexpr float SCROLL_MULTIPLIER = 25.0f;
 
-    auto is_discrete_input = [](float value) {
-        return std::abs(value - std::round(value)) < 0.001f && std::abs(value) >= 0.99f;
-    };
-
-    auto compute_delta = [this](float wheel_value, bool is_discrete) -> float {
-        float input = std::abs(wheel_value);
-        float delta;
-
-        if (is_discrete) {
-            delta = input * static_cast<float>(line_height * MOUSE_SCROLL_LINES);
-        } else {
-            float linear_part = input * TOUCHPAD_SCROLL_MULTIPLIER;
-            float quadratic_part = (input * input) * TOUCHPAD_FAST_MULTIPLIER;
-            delta = linear_part + quadratic_part;
-        }
-
-        return (wheel_value < 0) ? -delta : delta;
-    };
-
-    if (std::abs(wheel_x) > 0.001f) {
-        bool is_discrete = is_discrete_input(wheel_x);
-        float delta = compute_delta(wheel_x, is_discrete);
-
-        precise_scroll_x += delta;
-        precise_scroll_x = std::max(0.0, precise_scroll_x);
-
-        if (dt_ms > 50.0f) velocity_x = 0.0;
-
-        double instant_velocity = delta;
-        velocity_x = is_discrete ? 0.0 : (velocity_x * 0.3) + (instant_velocity * 0.7);
-
-        scroll_state = ScrollState::DirectControl;
-        last_scroll_event_time = now;
+    if (std::abs(wheel_x) > 0.0001f) {
+        target_scroll_x += wheel_x * SCROLL_MULTIPLIER;
+        if (target_scroll_x < 0.0) target_scroll_x = 0.0;
     }
 
     if (std::abs(wheel_y) > 0.0001f) {
-        bool is_discrete = is_discrete_input(wheel_y);
-        float delta = compute_delta(wheel_y, is_discrete);
-
-        precise_scroll_y -= delta;
-
-        if (dt_ms > 50.0f) velocity_y = 0.0;
-        double instant_velocity = -delta;
-        velocity_y = is_discrete ? 0.0 : (velocity_y * 0.3) + (instant_velocity * 0.7);
-
-        scroll_state = ScrollState::DirectControl;
-        last_scroll_event_time = now;
-
+        target_scroll_y -= wheel_y * SCROLL_MULTIPLIER;
+        
         float max_scroll = get_max_scroll_pixels(doc);
-        clamp_scroll_values(max_scroll);
+        if (target_scroll_y < 0.0) target_scroll_y = 0.0;
+        if (target_scroll_y > max_scroll) target_scroll_y = max_scroll;
     }
 }
 
 void EditorView::update_smooth_scroll(const TextDocument& doc) {
-    Uint32 now = SDL_GetTicks();
-    double dt = std::min((now - last_update_time) / 16.0, 4.0);
-    last_update_time = now;
+    constexpr double LERP_FACTOR = 0.15;
 
-    float max_scroll_y = get_max_scroll_pixels(doc);
-
-    switch (scroll_state) {
-        case ScrollState::Idle:
-            break;
-
-        case ScrollState::DirectControl:
-            if (now - last_scroll_event_time > MOMENTUM_DELAY_MS) {
-                bool has_momentum_x = std::abs(velocity_x) > MIN_LAUNCH_VELOCITY;
-                bool has_momentum_y = std::abs(velocity_y) > MIN_LAUNCH_VELOCITY;
-
-                if (has_momentum_x || has_momentum_y) {
-                    scroll_state = ScrollState::Momentum;
-                    if (!has_momentum_x) velocity_x = 0.0;
-                    if (!has_momentum_y) velocity_y = 0.0;
-                } else {
-                    velocity_x = 0.0;
-                    velocity_y = 0.0;
-                    scroll_state = ScrollState::Idle;
-                }
-            }
-            break;
-
-        case ScrollState::Momentum:
-            if (std::abs(velocity_x) > VELOCITY_STOP_THRESHOLD) {
-                precise_scroll_x += velocity_x * dt;
-                velocity_x *= std::pow(MOMENTUM_FRICTION, dt);
-
-                if (precise_scroll_x < 0.0) {
-                    precise_scroll_x = 0.0;
-                    velocity_x = 0.0;
-                }
-
-            } else {
-                velocity_x = 0.0;
-            }
-
-            if (std::abs(velocity_y) > VELOCITY_STOP_THRESHOLD) {
-                precise_scroll_y += velocity_y * dt;
-                velocity_y *= std::pow(MOMENTUM_FRICTION, dt);
-            } else {
-                velocity_y = 0.0;
-            }
-
-            if (velocity_x == 0.0 && velocity_y == 0.0) {
-                scroll_state = ScrollState::Idle;
-            }
-            break;
-
-        case ScrollState::AnimatingToTarget:
-            break;
+    double diff_y = target_scroll_y - precise_scroll_y;
+    if (std::abs(diff_y) > 0.5) {
+        precise_scroll_y += diff_y * LERP_FACTOR;
+    } else if (std::abs(diff_y) > 0.001) {
+        precise_scroll_y = target_scroll_y;
     }
 
+    double diff_x = target_scroll_x - precise_scroll_x;
+    if (std::abs(diff_x) > 0.5) {
+        precise_scroll_x += diff_x * LERP_FACTOR;
+    } else if (std::abs(diff_x) > 0.001) {
+        precise_scroll_x = target_scroll_x;
+    }
+
+    float max_scroll_y = get_max_scroll_pixels(doc);
     if (precise_scroll_y < 0.0) {
-        precise_scroll_y = 0.0; velocity_y = 0.0;
+        precise_scroll_y = 0.0;
+        target_scroll_y = 0.0;
     } else if (precise_scroll_y > max_scroll_y) {
-        precise_scroll_y = max_scroll_y; velocity_y = 0.0;
+        precise_scroll_y = max_scroll_y;
+        target_scroll_y = max_scroll_y;
+    }
+
+    if (precise_scroll_x < 0.0) {
+        precise_scroll_x = 0.0;
+        target_scroll_x = 0.0;
     }
 
     scroll_y = static_cast<int>(precise_scroll_y / line_height);
