@@ -95,7 +95,7 @@ jobs:
             ffmpeg
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload Artifact
         if: matrix.distro == 'Ubuntu 24.04'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: DeadEditor-linux-x86_64
           path: DeadEditor-linux-x86_64.tar.gz
@@ -145,7 +145,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -194,14 +194,14 @@ jobs:
           file build/DeadEditor.app/Contents/MacOS/DeadEditor
 
       - name: Upload App Bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: DeadEditor-macos-${{ matrix.arch }}-app
           path: build/DeadEditor.app
           retention-days: 7
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: DeadEditor-macos-${{ matrix.arch }}-dmg
           path: build/*.dmg
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
