@@ -1,5 +1,5 @@
 project('dead_editor', ['c', 'cpp'],
-  version : '0.6.0',
+  version : '0.6.1',
   default_options : ['cpp_std=c++23', 'c_std=c11', 'warning_level=2']
 )
 

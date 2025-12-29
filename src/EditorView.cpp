@@ -397,7 +397,7 @@ void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool sh
         wheel_y = 0;
     }
 
-    constexpr float SCROLL_MULTIPLIER = 25.0f;
+    constexpr float SCROLL_MULTIPLIER = 50.0f;
 
     if (std::abs(wheel_x) > 0.0001f) {
         target_scroll_x += wheel_x * SCROLL_MULTIPLIER;
@@ -406,7 +406,7 @@ void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool sh
 
     if (std::abs(wheel_y) > 0.0001f) {
         target_scroll_y -= wheel_y * SCROLL_MULTIPLIER;
-        
+
         float max_scroll = get_max_scroll_pixels(doc);
         if (target_scroll_y < 0.0) target_scroll_y = 0.0;
         if (target_scroll_y > max_scroll) target_scroll_y = max_scroll;
@@ -414,7 +414,7 @@ void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool sh
 }
 
 void EditorView::update_smooth_scroll(const TextDocument& doc) {
-    constexpr double LERP_FACTOR = 0.15;
+    constexpr double LERP_FACTOR = 0.25;
 
     double diff_y = target_scroll_y - precise_scroll_y;
     if (std::abs(diff_y) > 0.5) {
