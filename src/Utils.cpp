@@ -315,3 +315,33 @@ void open_containing_folder(const std::string& path) {
 #endif
     system(cmd.c_str());
 }
+
+std::string expand_tabs(const std::string& text, int tab_width) {
+    std::string result;
+    result.reserve(text.size());
+    int column = 0;
+    for (char c : text) {
+        if (c == '\t') {
+            int spaces = tab_width - (column % tab_width);
+            result.append(spaces, ' ');
+            column += spaces;
+        } else {
+            result.push_back(c);
+            column++;
+        }
+    }
+    return result;
+}
+
+int expanded_column(const std::string& text, int byte_pos, int tab_width) {
+    int column = 0;
+    int len = std::min(byte_pos, static_cast<int>(text.size()));
+    for (int i = 0; i < len; i++) {
+        if (text[i] == '\t') {
+            column += tab_width - (column % tab_width);
+        } else {
+            column++;
+        }
+    }
+    return column;
+}

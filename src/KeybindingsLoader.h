@@ -1,6 +1,7 @@
 #pragma once
 
 #include "InputMapper.h"
+#include "Constants.h"
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -99,6 +100,8 @@ inline std::optional<KeyCombo> parse_key_combo(std::string_view combo_str) {
             mod |= KMOD_ALT;
         } else if (part == "meta" || part == "cmd" || part == "super" || part == "win") {
             mod |= KMOD_GUI;
+        } else if (part == "primary") {
+            mod |= META_MOD;
         } else {
             if (auto it = keyname_map.find(part); it != keyname_map.end()) {
                 key = it->second;

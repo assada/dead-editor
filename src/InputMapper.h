@@ -7,6 +7,7 @@
 #include <functional>
 #include <vector>
 #include <optional>
+#include "Constants.h"
 
 struct KeyCombo {
     SDL_Keycode key = SDLK_UNKNOWN;
@@ -103,4 +104,7 @@ namespace KeyMod {
     constexpr uint16_t CtrlShift = KMOD_CTRL | KMOD_SHIFT;
     constexpr uint16_t CtrlAlt = KMOD_CTRL | KMOD_ALT;
     constexpr uint16_t AltShift = KMOD_ALT | KMOD_SHIFT;
+    constexpr uint16_t Primary = META_MOD;
+    constexpr uint16_t PrimaryShift = META_MOD | KMOD_SHIFT;
+    constexpr uint16_t PrimaryAlt = META_MOD | KMOD_ALT;
 }

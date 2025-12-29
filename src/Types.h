@@ -42,7 +42,15 @@ enum class TokenType {
     Preprocessor,
     Operator,
     Function,
-    Variable
+    Variable,
+    Parameter,
+    Property,
+    Constant,
+    Namespace,
+    Attribute,
+    Tag,
+    Punctuation,
+    Label
 };
 
 struct Token {

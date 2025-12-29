@@ -1,0 +1,9 @@
+[wrap-git]
+url = https://github.com/justinmk/tree-sitter-ini.git
+revision = v1.4.0
+depth = 1
+patch_directory = tree-sitter-ini
+
+[provide]
+dependency_names = tree-sitter-ini
+

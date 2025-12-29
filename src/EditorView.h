@@ -14,8 +14,27 @@
 
 class EditorView {
 public:
+    enum class ScrollState {
+        Idle,
+        DirectControl,
+        Momentum,
+        AnimatingToTarget
+    };
+
     int scroll_x = 0;
     int scroll_y = 0;
+
+    double precise_scroll_y = 0.0;
+    double target_scroll_y = 0.0;
+    double velocity_y = 0.0;
+
+    double precise_scroll_x = 0.0; 
+    double velocity_x = 0.0;
+    
+    ScrollState scroll_state = ScrollState::Idle;
+    Uint32 last_update_time = 0;
+    Uint32 last_scroll_event_time = 0;
+    
     int line_height = 20;
 
     bool scrollbar_dragging = false;
@@ -74,7 +93,15 @@ public:
     void ensure_cursor_visible(LineIdx cursor_line, int visible_lines, const TextDocument& doc);
     void ensure_visible_x(int cursor_pixel_x, int visible_width, int margin);
 
-    void handle_scroll(int wheel_x, int wheel_y, int char_w, bool shift_held, const TextDocument& doc);
+    void handle_scroll(float wheel_x, float wheel_y, int char_w, bool shift_held, const TextDocument& doc);
+    void update_smooth_scroll(const TextDocument& doc);
+    void sync_scroll_position(const TextDocument& doc);
+    float get_max_scroll_pixels(const TextDocument& doc) const;
+    void clamp_scroll_values(float max_scroll);
+
+    int get_pixel_offset() const { 
+        return static_cast<int>(precise_scroll_y) % line_height; 
+    }
 
     void render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& texture_cache,
                 const TextDocument& doc,

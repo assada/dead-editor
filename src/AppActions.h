@@ -151,33 +151,33 @@ private:
     void setup_default_bindings() {
         using namespace Actions::App;
 
-        mapper_.bind({SDLK_s, KeyMod::Ctrl}, Save, InputContext::Editor);
-        mapper_.bind({SDLK_f, KeyMod::Ctrl}, Search, InputContext::Editor);
-        mapper_.bind({SDLK_g, KeyMod::Ctrl}, GoToLine, InputContext::Editor);
+        mapper_.bind({SDLK_s, KeyMod::Primary}, Save, InputContext::Editor);
+        mapper_.bind({SDLK_f, KeyMod::Primary}, Search, InputContext::Editor);
+        mapper_.bind({SDLK_g, KeyMod::Primary}, GoToLine, InputContext::Editor);
         mapper_.bind({SDLK_F3, KeyMod::None}, FindNext, InputContext::Editor);
-        mapper_.bind({SDLK_q, KeyMod::Ctrl}, Quit, InputContext::Global);
+        mapper_.bind({SDLK_q, KeyMod::Primary}, Quit, InputContext::Global);
 
-        mapper_.bind({SDLK_e, KeyMod::Ctrl}, ToggleFocus, InputContext::Global);
-        mapper_.bind({SDLK_BACKQUOTE, KeyMod::Ctrl}, FocusTerminal, InputContext::Global);
+        mapper_.bind({SDLK_e, KeyMod::Primary}, ToggleFocus, InputContext::Global);
+        mapper_.bind({SDLK_BACKQUOTE, KeyMod::Primary}, FocusTerminal, InputContext::Global);
         mapper_.bind({SDLK_F5, KeyMod::None}, ToggleTerminal, InputContext::Global);
 
-        mapper_.bind({SDLK_TAB, KeyMod::Ctrl}, NextTab, InputContext::Editor);
-        mapper_.bind({SDLK_TAB, KeyMod::CtrlShift}, PrevTab, InputContext::Editor);
-        mapper_.bind({SDLK_F4, KeyMod::Ctrl}, CloseTab, InputContext::Editor);
+        mapper_.bind({SDLK_TAB, KeyMod::Primary}, NextTab, InputContext::Editor);
+        mapper_.bind({SDLK_TAB, KeyMod::PrimaryShift}, PrevTab, InputContext::Editor);
+        mapper_.bind({SDLK_F4, KeyMod::Primary}, CloseTab, InputContext::Editor);
 
-        mapper_.bind({SDLK_PLUS, KeyMod::Ctrl}, ZoomIn, InputContext::Editor);
-        mapper_.bind({SDLK_EQUALS, KeyMod::Ctrl}, ZoomIn, InputContext::Editor);
-        mapper_.bind({SDLK_KP_PLUS, KeyMod::Ctrl}, ZoomIn, InputContext::Editor);
-        mapper_.bind({SDLK_MINUS, KeyMod::Ctrl}, ZoomOut, InputContext::Editor);
-        mapper_.bind({SDLK_KP_MINUS, KeyMod::Ctrl}, ZoomOut, InputContext::Editor);
-        mapper_.bind({SDLK_0, KeyMod::Ctrl}, ZoomReset, InputContext::Editor);
-        mapper_.bind({SDLK_KP_0, KeyMod::Ctrl}, ZoomReset, InputContext::Editor);
+        mapper_.bind({SDLK_PLUS, KeyMod::Primary}, ZoomIn, InputContext::Editor);
+        mapper_.bind({SDLK_EQUALS, KeyMod::Primary}, ZoomIn, InputContext::Editor);
+        mapper_.bind({SDLK_KP_PLUS, KeyMod::Primary}, ZoomIn, InputContext::Editor);
+        mapper_.bind({SDLK_MINUS, KeyMod::Primary}, ZoomOut, InputContext::Editor);
+        mapper_.bind({SDLK_KP_MINUS, KeyMod::Primary}, ZoomOut, InputContext::Editor);
+        mapper_.bind({SDLK_0, KeyMod::Primary}, ZoomReset, InputContext::Editor);
+        mapper_.bind({SDLK_KP_0, KeyMod::Primary}, ZoomReset, InputContext::Editor);
 
-        mapper_.bind({SDLK_UP, KeyMod::CtrlShift}, TerminalResizeUp, InputContext::Terminal);
-        mapper_.bind({SDLK_DOWN, KeyMod::CtrlShift}, TerminalResizeDown, InputContext::Terminal);
-        mapper_.bind({SDLK_v, KeyMod::CtrlShift}, TerminalPaste, InputContext::Terminal);
+        mapper_.bind({SDLK_UP, KeyMod::PrimaryShift}, TerminalResizeUp, InputContext::Terminal);
+        mapper_.bind({SDLK_DOWN, KeyMod::PrimaryShift}, TerminalResizeDown, InputContext::Terminal);
+        mapper_.bind({SDLK_v, KeyMod::PrimaryShift}, TerminalPaste, InputContext::Terminal);
 
-        mapper_.bind({SDLK_k, KeyMod::Ctrl}, Actions::Git::Commit, InputContext::Global);
+        mapper_.bind({SDLK_k, KeyMod::Primary}, Actions::Git::Commit, InputContext::Global);
         mapper_.bind({SDLK_F1, KeyMod::Alt}, ScrollToSource, InputContext::Global);
     }
 

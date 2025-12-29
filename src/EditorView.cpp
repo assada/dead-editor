@@ -1,6 +1,8 @@
 #include "EditorView.h"
 #include "RenderUtils.h"
+#include "Utils.h"
 #include <algorithm>
+#include <cmath>
 #include <format>
 
 void EditorView::init_for_file(const std::string& filepath, const TextDocument& doc) {
@@ -305,6 +307,31 @@ LineIdx EditorView::get_next_visible_line(LineIdx from_line, int direction, cons
     return from_line;
 }
 
+float EditorView::get_max_scroll_pixels(const TextDocument& doc) const {
+    int total_visible = get_total_visible_lines(doc);
+    return std::max(0.0f, (float)((total_visible - 1) * line_height));
+}
+
+void EditorView::clamp_scroll_values(float max_scroll) {
+    if (precise_scroll_y < 0.0) {
+        precise_scroll_y = 0.0;
+        velocity_y = 0.0;
+        if (scroll_state == ScrollState::Momentum) scroll_state = ScrollState::Idle;
+    } else if (precise_scroll_y > max_scroll) {
+        precise_scroll_y = max_scroll;
+        velocity_y = 0.0f;
+        if (scroll_state == ScrollState::Momentum) scroll_state = ScrollState::Idle;
+    }
+}
+
+void EditorView::sync_scroll_position(const TextDocument& /*doc*/) {
+    int visual_lines_above = count_visible_lines_between(0, scroll_y);
+    precise_scroll_y = static_cast<double>(visual_lines_above * line_height);
+    target_scroll_y = precise_scroll_y;
+    velocity_y = 0.0;
+    scroll_state = ScrollState::Idle;
+}
+
 void EditorView::get_scrollbar_metrics(int visible_height, int min_thumb_height, int& thumb_height, int& thumb_y,
                                         const TextDocument& doc) const {
     int total_visible = get_total_visible_lines(doc);
@@ -319,11 +346,8 @@ void EditorView::get_scrollbar_metrics(int visible_height, int min_thumb_height,
     float thumb_ratio = static_cast<float>(visible_lines) / total_visible;
     thumb_height = std::max(min_thumb_height, static_cast<int>(visible_height * thumb_ratio));
 
-    int scroll_y_visible = (scroll_y > 0) ? count_visible_lines_between(0, scroll_y - 1) : 0;
-    int max_scroll_visible = total_visible - visible_lines;
-    float scroll_ratio = (max_scroll_visible > 0) ? static_cast<float>(scroll_y_visible) / max_scroll_visible : 0.0f;
-    scroll_ratio = std::max(0.0f, std::min(1.0f, scroll_ratio));
-
+    float max_scroll = std::max(1.0f, get_max_scroll_pixels(doc));
+    float scroll_ratio = std::clamp(static_cast<float>(precise_scroll_y) / max_scroll, 0.0f, 1.0f);
     thumb_y = static_cast<int>(scroll_ratio * (visible_height - thumb_height));
 }
 
@@ -336,11 +360,13 @@ bool EditorView::is_point_in_scrollbar(int x, int y, int x_offset, int y_offset,
 void EditorView::scroll_to_line(LineIdx target_line, const TextDocument& doc) {
     target_line = std::max(LineIdx{0}, std::min(target_line, static_cast<LineIdx>(doc.lines.size()) - 1));
     scroll_y = get_first_visible_line_from(target_line);
+    sync_scroll_position(doc);
 }
 
 void EditorView::ensure_cursor_visible(LineIdx cursor_line, int visible_lines, const TextDocument& doc) {
     int cursor_visual = get_first_visible_line_from(cursor_line);
     int lines_from_top = count_visible_lines_between(scroll_y, cursor_visual);
+    int old_scroll_y = scroll_y;
 
     if (cursor_visual < scroll_y) {
         scroll_y = cursor_visual;
@@ -350,6 +376,10 @@ void EditorView::ensure_cursor_visible(LineIdx cursor_line, int visible_lines, c
         scroll_y = get_nth_visible_line_from(scroll_y, lines_to_skip, doc);
     }
     scroll_y = get_first_visible_line_from(scroll_y);
+
+    if (scroll_y != old_scroll_y) {
+        sync_scroll_position(doc);
+    }
 }
 
 void EditorView::ensure_visible_x(int cursor_pixel_x, int visible_width, int margin) {
@@ -361,21 +391,125 @@ void EditorView::ensure_visible_x(int cursor_pixel_x, int visible_width, int mar
     }
 }
 
-void EditorView::handle_scroll(int wheel_x, int wheel_y, int char_w, bool shift_held, const TextDocument& doc) {
+void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool shift_held, const TextDocument& doc) {
     if (shift_held) {
-        scroll_x += wheel_y * char_w * 3;
-        scroll_x = std::max(0, scroll_x);
-    } else if (wheel_x != 0) {
-        scroll_x -= wheel_x * char_w * 3;
-        scroll_x = std::max(0, scroll_x);
-    } else {
-        int scroll_amount = -wheel_y * 3;
-        scroll_y = get_nth_visible_line_from(scroll_y, scroll_amount, doc);
-        scroll_y = std::max(0, scroll_y);
-        int max_scroll = std::max(0, static_cast<int>(doc.lines.size()) - 1);
-        scroll_y = std::min(scroll_y, max_scroll);
-        scroll_y = get_first_visible_line_from(scroll_y);
+        wheel_x = wheel_y; 
+        wheel_y = 0;
     }
+    
+    Uint32 now = SDL_GetTicks();
+    float dt_ms = static_cast<float>(now - last_scroll_event_time);
+
+    if (std::abs(wheel_x) > 0.001f) {
+        float input = std::abs(wheel_x);
+        float linear_part = input * SCROLL_SENSITIVITY;
+        float quadratic_part = (input * input) * SCROLL_FAST_MULTIPLIER;
+        
+        float delta = linear_part + quadratic_part;
+        
+        if (wheel_x < 0) delta = -delta;
+
+        precise_scroll_x += delta;
+        precise_scroll_x = std::max(0.0, precise_scroll_x);
+
+        if (dt_ms > 30.0f) velocity_x = 0.0;
+        
+        double instant_velocity = delta;
+        velocity_x = (velocity_x * 0.2) + (instant_velocity * 0.8);
+        
+        scroll_state = ScrollState::DirectControl;
+        last_scroll_event_time = now;
+    }
+
+    if (std::abs(wheel_y) > 0.0001f) {        
+        float input = std::abs(wheel_y);
+        float linear_part = input * SCROLL_SENSITIVITY;
+        float quadratic_part = (input * input) * SCROLL_FAST_MULTIPLIER;
+        float delta = linear_part + quadratic_part;
+        
+        if (wheel_y < 0) delta = -delta;
+        
+        precise_scroll_y -= delta;
+        
+        if (dt_ms > 30.0f) velocity_y = 0.0;
+        double instant_velocity = -delta;
+        velocity_y = (velocity_y * 0.2) + (instant_velocity * 0.8);
+        
+        scroll_state = ScrollState::DirectControl;
+        last_scroll_event_time = now;
+        
+        float max_scroll = get_max_scroll_pixels(doc);
+        clamp_scroll_values(max_scroll);
+    }
+}
+
+void EditorView::update_smooth_scroll(const TextDocument& doc) {
+    Uint32 now = SDL_GetTicks();
+    double dt = std::min((now - last_update_time) / 16.0, 4.0); 
+    last_update_time = now;
+
+    float max_scroll_y = get_max_scroll_pixels(doc);
+
+    switch (scroll_state) {
+        case ScrollState::Idle:
+            break;
+
+        case ScrollState::DirectControl:
+            if (now - last_scroll_event_time > MOMENTUM_DELAY_MS) {
+                bool has_momentum_x = std::abs(velocity_x) > MIN_LAUNCH_VELOCITY;
+                bool has_momentum_y = std::abs(velocity_y) > MIN_LAUNCH_VELOCITY;
+
+                if (has_momentum_x || has_momentum_y) {
+                    scroll_state = ScrollState::Momentum;
+                    if (!has_momentum_x) velocity_x = 0.0;
+                    if (!has_momentum_y) velocity_y = 0.0;
+                } else {
+                    velocity_x = 0.0;
+                    velocity_y = 0.0;
+                    scroll_state = ScrollState::Idle;
+                }
+            }
+            break;
+
+        case ScrollState::Momentum:
+            if (std::abs(velocity_x) > VELOCITY_STOP_THRESHOLD) {
+                precise_scroll_x += velocity_x * dt;
+                velocity_x *= std::pow(MOMENTUM_FRICTION, dt);
+                
+                if (precise_scroll_x < 0.0) {
+                    precise_scroll_x = 0.0;
+                    velocity_x = 0.0;
+                }
+
+            } else {
+                velocity_x = 0.0;
+            }
+
+            if (std::abs(velocity_y) > VELOCITY_STOP_THRESHOLD) {
+                precise_scroll_y += velocity_y * dt;
+                velocity_y *= std::pow(MOMENTUM_FRICTION, dt);
+            } else {
+                velocity_y = 0.0;
+            }
+
+            if (velocity_x == 0.0 && velocity_y == 0.0) {
+                scroll_state = ScrollState::Idle;
+            }
+            break;
+    }
+
+    if (precise_scroll_y < 0.0) {
+        precise_scroll_y = 0.0; velocity_y = 0.0;
+    } else if (precise_scroll_y > max_scroll_y) {
+        precise_scroll_y = max_scroll_y; velocity_y = 0.0;
+    }
+
+    scroll_y = static_cast<int>(precise_scroll_y / line_height);
+    if (scroll_y < 0) scroll_y = 0;
+    int max_lines = static_cast<int>(doc.lines.size());
+    if (scroll_y >= max_lines && max_lines > 0) scroll_y = max_lines - 1;
+
+    scroll_x = static_cast<int>(precise_scroll_x);
 }
 
 void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& texture_cache,
@@ -395,11 +529,16 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
     int visible_end_y = y_offset + visible_height;
     int visible_lines = visible_height / line_height;
     int text_x = x_offset + GUTTER_WIDTH + PADDING - scroll_x;
-    int y = y_offset;
+    
+    int pixel_offset = static_cast<int>(precise_scroll_y) % line_height;
+    int y = y_offset - pixel_offset;
 
     SDL_SetRenderDrawColor(renderer, Colors::GUTTER.r, Colors::GUTTER.g, Colors::GUTTER.b, 255);
     SDL_Rect gutter_rect = {x_offset, y_offset, GUTTER_WIDTH, visible_height};
     SDL_RenderFillRect(renderer, &gutter_rect);
+
+    SDL_Rect gutter_clip = {x_offset, y_offset, GUTTER_WIDTH, visible_height};
+    SDL_RenderSetClipRect(renderer, &gutter_clip);
 
     for (int i = scroll_y; i < static_cast<int>(doc.lines.size()) && y < visible_end_y; i++) {
         if (is_line_folded(i)) continue;
@@ -422,6 +561,7 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
         y += line_height;
     }
 
+    SDL_RenderSetClipRect(renderer, nullptr);
     SDL_Rect text_clip = {x_offset + GUTTER_WIDTH, y_offset, visible_width - GUTTER_WIDTH, visible_height};
     SDL_RenderSetClipRect(renderer, &text_clip);
 
@@ -433,7 +573,8 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
     }
     const_cast<EditorView*>(this)->prefetch_viewport_tokens(scroll_y, visible_lines + 5, doc);
 
-    y = y_offset;
+    y = y_offset - pixel_offset;
+    
     for (int i = scroll_y; i < static_cast<int>(doc.lines.size()) && y < visible_end_y; i++) {
         if (is_line_folded(i)) continue;
 
@@ -445,14 +586,17 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
 
         for (const auto& hl : highlight_occurrences) {
             if (hl.line == i) {
+                std::string expanded_line = expand_tabs(doc.lines[i]);
+                int exp_start = expanded_column(doc.lines[i], hl.start_col);
+                int exp_end = expanded_column(doc.lines[i], hl.end_col);
                 int hl_x_start = text_x;
-                if (hl.start_col > 0) {
+                if (exp_start > 0) {
                     int w = 0;
-                    TTF_SizeUTF8(font, doc.lines[i].substr(0, hl.start_col).c_str(), &w, nullptr);
+                    TTF_SizeUTF8(font, expanded_line.substr(0, exp_start).c_str(), &w, nullptr);
                     hl_x_start += w;
                 }
                 int hl_w = 0;
-                TTF_SizeUTF8(font, doc.lines[i].substr(hl.start_col, hl.end_col - hl.start_col).c_str(), &hl_w, nullptr);
+                TTF_SizeUTF8(font, expanded_line.substr(exp_start, exp_end - exp_start).c_str(), &hl_w, nullptr);
                 SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(renderer, Colors::OCCURRENCE_HIGHLIGHT.r, Colors::OCCURRENCE_HIGHLIGHT.g,
                                        Colors::OCCURRENCE_HIGHLIGHT.b, Colors::OCCURRENCE_HIGHLIGHT.a);
@@ -473,18 +617,21 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
             }
 
             if (i >= s_line && i <= e_line) {
+                std::string expanded_line = expand_tabs(doc.lines[i]);
                 int line_len = static_cast<int>(doc.lines[i].size());
                 int line_start = (i == s_line) ? std::min(s_col, line_len) : 0;
                 int line_end = (i == e_line) ? std::min(e_col, line_len) : line_len;
+                int exp_start = expanded_column(doc.lines[i], line_start);
+                int exp_end = expanded_column(doc.lines[i], line_end);
                 int x_start = text_x;
-                if (line_start > 0) {
+                if (exp_start > 0) {
                     int w = 0;
-                    TTF_SizeUTF8(font, doc.lines[i].substr(0, line_start).c_str(), &w, nullptr);
+                    TTF_SizeUTF8(font, expanded_line.substr(0, exp_start).c_str(), &w, nullptr);
                     x_start += w;
                 }
                 int sel_w = 0;
-                if (line_end > line_start) {
-                    TTF_SizeUTF8(font, doc.lines[i].substr(line_start, line_end - line_start).c_str(), &sel_w, nullptr);
+                if (exp_end > exp_start) {
+                    TTF_SizeUTF8(font, expanded_line.substr(exp_start, exp_end - exp_start).c_str(), &sel_w, nullptr);
                 }
                 if (i < e_line) {
                     sel_w += char_width;
@@ -499,16 +646,19 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
         }
 
         if (!search_query.empty() && !doc.lines[i].empty()) {
+            std::string expanded_line = expand_tabs(doc.lines[i]);
             size_t pos = 0;
             while ((pos = doc.lines[i].find(search_query, pos)) != std::string::npos) {
+                int exp_pos = expanded_column(doc.lines[i], static_cast<int>(pos));
+                int exp_end = expanded_column(doc.lines[i], static_cast<int>(pos + search_query.size()));
                 int x_start = text_x;
-                if (pos > 0) {
+                if (exp_pos > 0) {
                     int w = 0;
-                    TTF_SizeUTF8(font, doc.lines[i].substr(0, pos).c_str(), &w, nullptr);
+                    TTF_SizeUTF8(font, expanded_line.substr(0, exp_pos).c_str(), &w, nullptr);
                     x_start += w;
                 }
                 int highlight_w = 0;
-                TTF_SizeUTF8(font, search_query.c_str(), &highlight_w, nullptr);
+                TTF_SizeUTF8(font, expanded_line.substr(exp_pos, exp_end - exp_pos).c_str(), &highlight_w, nullptr);
                 SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(renderer, Colors::SEARCH_HIGHLIGHT.r, Colors::SEARCH_HIGHLIGHT.g,
                                        Colors::SEARCH_HIGHLIGHT.b, Colors::SEARCH_HIGHLIGHT.a);
@@ -573,7 +723,8 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
             std::string fold_text = std::format(" ... ({} lines)", fold_end - i);
             int line_w = 0;
             if (!doc.lines[i].empty()) {
-                TTF_SizeUTF8(font, doc.lines[i].c_str(), &line_w, nullptr);
+                std::string expanded_line = expand_tabs(doc.lines[i]);
+                TTF_SizeUTF8(font, expanded_line.c_str(), &line_w, nullptr);
             }
             texture_cache.render_cached_text(fold_text, Colors::FOLD_INDICATOR, text_x + line_w, y);
         }
@@ -581,9 +732,9 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
         if (i == cursor_line && cursor_visible && is_file_open && has_focus) {
             int cursor_x_local = text_x;
             if (cursor_col > 0 && !doc.lines[i].empty()) {
-                std::string before_cursor = doc.lines[i].substr(0, cursor_col);
+                std::string expanded_before = expand_tabs(doc.lines[i].substr(0, cursor_col));
                 int w = 0;
-                TTF_SizeUTF8(font, before_cursor.c_str(), &w, nullptr);
+                TTF_SizeUTF8(font, expanded_before.c_str(), &w, nullptr);
                 cursor_x_local += w;
             }
             SDL_SetRenderDrawColor(renderer, Colors::CURSOR.r, Colors::CURSOR.g, Colors::CURSOR.b, 255);
@@ -631,6 +782,14 @@ void EditorView::clear_caches() {
     fold_regions.clear();
     fold_regions.shrink_to_fit();
     folded_lines.clear();
+    
+    precise_scroll_x = 0.0;
+    velocity_x = 0.0;
     scroll_x = 0;
     scroll_y = 0;
+    precise_scroll_y = 0.0;
+    target_scroll_y = 0.0;
+    velocity_y = 0.0;
+    scroll_state = ScrollState::Idle;
+    last_update_time = SDL_GetTicks();
 }

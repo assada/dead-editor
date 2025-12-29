@@ -26,6 +26,8 @@ ColIdx utf8_next_char_pos(const std::string& str, ColIdx pos);
 ColIdx utf8_clamp_to_char_boundary(const std::string& str, ColIdx pos);
 uint32_t utf8_decode_at(const std::string& str, ColIdx pos);
 bool is_word_codepoint(uint32_t cp);
+std::string expand_tabs(const std::string& text, int tab_width = 4);
+int expanded_column(const std::string& text, int byte_pos, int tab_width = 4);
 bool is_directory(const char* path);
 std::string get_resource_path(const std::string& filename);
 std::string get_config_path(const std::string& filename);

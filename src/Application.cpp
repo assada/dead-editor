@@ -519,7 +519,21 @@ void Application::dispatch_mouse_event(const SDL_Event& event) {
         } else if (auto* ed = tab_bar.get_active_editor()) {
             const Uint8* keys = SDL_GetKeyboardState(nullptr);
             bool shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
-            ed->handle_scroll(event.wheel.x, event.wheel.y, font_manager.get_char_width(), shift);
+
+            float wheel_x = event.wheel.x;
+            float wheel_y = event.wheel.y;
+
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+            wheel_x = event.wheel.preciseX;
+            wheel_y = event.wheel.preciseY;
+#endif
+
+            if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED && false) {
+                wheel_x *= -1;
+                wheel_y *= -1;
+            }
+
+            ed->handle_scroll(wheel_x, wheel_y, font_manager.get_char_width(), shift);
         }
         return;
     }
@@ -1114,7 +1128,8 @@ void Application::ensure_cursor_visible() {
         int visible_w = window_w - tree_w - layout.gutter_width - layout.padding;
         int cursor_px = 0;
         if (ed->get_cursor_col() > 0 && !ed->get_lines()[ed->get_cursor_line()].empty()) {
-            TTF_SizeUTF8(font_manager.get(), ed->get_lines()[ed->get_cursor_line()].substr(0, ed->get_cursor_col()).c_str(), &cursor_px, nullptr);
+            std::string expanded = expand_tabs(ed->get_lines()[ed->get_cursor_line()].substr(0, ed->get_cursor_col()));
+            TTF_SizeUTF8(font_manager.get(), expanded.c_str(), &cursor_px, nullptr);
         }
         ed->ensure_visible_x(cursor_px, visible_w, font_manager.get_char_width() * 2);
     }
@@ -1132,6 +1147,15 @@ SDL_Color Application::get_syntax_color(TokenType type) {
         case TokenType::Preprocessor: return Colors::SYNTAX_PREPROC;
         case TokenType::Function: return Colors::SYNTAX_FUNCTION;
         case TokenType::Variable: return Colors::SYNTAX_VARIABLE;
+        case TokenType::Parameter: return Colors::SYNTAX_PARAMETER;
+        case TokenType::Property: return Colors::SYNTAX_PROPERTY;
+        case TokenType::Constant: return Colors::SYNTAX_CONSTANT;
+        case TokenType::Namespace: return Colors::SYNTAX_NAMESPACE;
+        case TokenType::Attribute: return Colors::SYNTAX_ATTRIBUTE;
+        case TokenType::Tag: return Colors::SYNTAX_TAG;
+        case TokenType::Operator: return Colors::SYNTAX_OPERATOR;
+        case TokenType::Punctuation: return Colors::SYNTAX_PUNCTUATION;
+        case TokenType::Label: return Colors::SYNTAX_LABEL;
         default: return Colors::TEXT;
     }
 }

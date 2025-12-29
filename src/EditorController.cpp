@@ -1099,7 +1099,7 @@ void EditorController::update_cursor_from_mouse(int x, int y, int x_offset, int 
 
     if (x < text_area_x) x = text_area_x;
 
-    int relative_y = y - y_offset;
+    int relative_y = y - y_offset + view.get_pixel_offset();
     if (relative_y < 0) relative_y = 0;
 
     int lh = view.line_height > 0 ? view.line_height : 20;
@@ -1131,14 +1131,16 @@ void EditorController::update_cursor_from_mouse(int x, int y, int x_offset, int 
         cursor_col = 0;
     } else {
         const std::string& line = doc.lines[cursor_line];
+        std::string expanded_line = expand_tabs(line);
         int best_col = 0;
         int best_diff = click_x;
 
         size_t col = 0;
         while (col < line.size()) {
             col = utf8_next_char_pos(line, col);
+            int exp_col = expanded_column(line, static_cast<int>(col));
             int w = 0;
-            TTF_SizeUTF8(font, line.substr(0, col).c_str(), &w, nullptr);
+            TTF_SizeUTF8(font, expanded_line.substr(0, exp_col).c_str(), &w, nullptr);
             int diff = std::abs(click_x - w);
             if (diff < best_diff) {
                 best_diff = diff;

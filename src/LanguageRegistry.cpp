@@ -18,6 +18,10 @@ extern "C" const TSLanguage* tree_sitter_json();
 extern "C" const TSLanguage* tree_sitter_javascript();
 extern "C" const TSLanguage* tree_sitter_html();
 extern "C" const TSLanguage* tree_sitter_css();
+extern "C" const TSLanguage* tree_sitter_php();
+extern "C" const TSLanguage* tree_sitter_bash();
+extern "C" const TSLanguage* tree_sitter_rust();
+extern "C" const TSLanguage* tree_sitter_ini();
 
 static const std::unordered_map<std::string, TokenType> CAPTURE_NAME_TO_TYPE = {
     {"comment", TokenType::Comment},
@@ -30,6 +34,7 @@ static const std::unordered_map<std::string, TokenType> CAPTURE_NAME_TO_TYPE = {
     {"integer", TokenType::Number},
     {"type", TokenType::Type},
     {"type.builtin", TokenType::Type},
+    {"type.definition", TokenType::Type},
     {"keyword", TokenType::Keyword},
     {"keyword.control", TokenType::Keyword},
     {"keyword.function", TokenType::Keyword},
@@ -39,6 +44,8 @@ static const std::unordered_map<std::string, TokenType> CAPTURE_NAME_TO_TYPE = {
     {"keyword.repeat", TokenType::Keyword},
     {"keyword.import", TokenType::Keyword},
     {"keyword.exception", TokenType::Keyword},
+    {"keyword.modifier", TokenType::Keyword},
+    {"keyword.storage", TokenType::Keyword},
     {"preprocessor", TokenType::Preprocessor},
     {"preproc", TokenType::Preprocessor},
     {"include", TokenType::Preprocessor},
@@ -46,25 +53,33 @@ static const std::unordered_map<std::string, TokenType> CAPTURE_NAME_TO_TYPE = {
     {"function", TokenType::Function},
     {"function.call", TokenType::Function},
     {"function.builtin", TokenType::Function},
+    {"function.method", TokenType::Function},
+    {"function.macro", TokenType::Function},
     {"method", TokenType::Function},
     {"method.call", TokenType::Function},
     {"variable", TokenType::Variable},
-    {"variable.builtin", TokenType::Variable},
-    {"variable.parameter", TokenType::Variable},
-    {"parameter", TokenType::Variable},
-    {"property", TokenType::Variable},
-    {"field", TokenType::Variable},
-    {"attribute", TokenType::Variable},
+    {"variable.builtin", TokenType::Constant},
+    {"variable.parameter", TokenType::Parameter},
+    {"parameter", TokenType::Parameter},
+    {"property", TokenType::Property},
+    {"field", TokenType::Property},
+    {"attribute", TokenType::Attribute},
+    {"attribute.builtin", TokenType::Attribute},
+    {"decorator", TokenType::Attribute},
     {"operator", TokenType::Operator},
-    {"punctuation", TokenType::Default},
-    {"constant", TokenType::Number},
-    {"constant.builtin", TokenType::Keyword},
-    {"boolean", TokenType::Keyword},
-    {"label", TokenType::Variable},
-    {"namespace", TokenType::Type},
-    {"module", TokenType::Type},
-    {"constructor", TokenType::Function},
-    {"tag", TokenType::Keyword},
+    {"punctuation", TokenType::Punctuation},
+    {"punctuation.bracket", TokenType::Punctuation},
+    {"punctuation.delimiter", TokenType::Punctuation},
+    {"punctuation.special", TokenType::Punctuation},
+    {"constant", TokenType::Constant},
+    {"constant.builtin", TokenType::Constant},
+    {"boolean", TokenType::Constant},
+    {"label", TokenType::Label},
+    {"namespace", TokenType::Namespace},
+    {"module", TokenType::Namespace},
+    {"constructor", TokenType::Type},
+    {"tag", TokenType::Tag},
+    {"tag.attribute", TokenType::Attribute},
     {"text", TokenType::Default},
     {"text.title", TokenType::Function},
     {"text.emphasis", TokenType::String},
@@ -76,6 +91,7 @@ static const std::unordered_map<std::string, TokenType> CAPTURE_NAME_TO_TYPE = {
     {"markup.italic", TokenType::String},
     {"markup.link", TokenType::String},
     {"markup.raw", TokenType::String},
+    {"escape", TokenType::Constant},
 };
 
 constexpr const char* CPP_QUERY = R"scm(
@@ -84,8 +100,8 @@ constexpr const char* CPP_QUERY = R"scm(
 (raw_string_literal) @string
 (system_lib_string) @string
 (char_literal) @char
-(escape_sequence) @char
 (number_literal) @number
+
 (primitive_type) @type
 (sized_type_specifier) @type
 (type_identifier) @type
@@ -102,20 +118,28 @@ constexpr const char* CPP_QUERY = R"scm(
 (call_expression function: (field_expression field: (field_identifier) @function))
 (function_declarator declarator: (identifier) @function)
 (function_declarator declarator: (qualified_identifier name: (identifier) @function))
+(function_declarator declarator: (field_identifier) @function)
+(template_function name: (identifier) @function)
+(template_method name: (field_identifier) @function)
+
+(field_identifier) @property
+
+(namespace_identifier) @namespace
+
+(this) @variable.builtin
+(null "nullptr" @constant)
+(true) @constant
+(false) @constant
 
 [
   "catch" "class" "co_await" "co_return" "co_yield" "constexpr" "constinit"
   "consteval" "delete" "explicit" "final" "friend" "mutable" "namespace"
   "noexcept" "new" "override" "private" "protected" "public" "template"
-  "throw" "try" "typename" "using" "virtual" "if" "else" "for" "while"
-  "do" "switch" "case" "default" "break" "continue" "return" "goto"
+  "throw" "try" "typename" "using" "concept" "requires" "virtual"
+  "if" "else" "for" "while" "do" "switch" "case" "default"
+  "break" "continue" "return" "goto"
   "struct" "union" "enum" "static" "extern" "inline" "const" "volatile" "typedef"
 ] @keyword
-
-(null "nullptr" @keyword)
-(true) @keyword
-(false) @keyword
-(this) @keyword
 )scm";
 
 constexpr const char* C_QUERY = R"scm(
@@ -123,8 +147,8 @@ constexpr const char* C_QUERY = R"scm(
 (string_literal) @string
 (system_lib_string) @string
 (char_literal) @char
-(escape_sequence) @char
 (number_literal) @number
+
 (primitive_type) @type
 (sized_type_specifier) @type
 (type_identifier) @type
@@ -134,47 +158,56 @@ constexpr const char* C_QUERY = R"scm(
 (preproc_function_def) @preprocessor
 (preproc_if) @preprocessor
 (preproc_ifdef) @preprocessor
+(preproc_directive) @preprocessor
 
 (call_expression function: (identifier) @function)
+(call_expression function: (field_expression field: (field_identifier) @function))
 (function_declarator declarator: (identifier) @function)
+(preproc_function_def name: (identifier) @function)
+
+(field_identifier) @property
+(statement_identifier) @label
+
+(null) @constant
+(true) @constant
+(false) @constant
 
 [
-  "if" "else" "for" "while" "do" "switch" "case" "default"
-  "break" "continue" "return" "goto" "struct" "union" "enum"
-  "typedef" "static" "extern" "inline" "const" "volatile"
-  "sizeof" "register" "auto"
+  "break" "case" "const" "continue" "default" "do" "else" "enum"
+  "extern" "for" "if" "inline" "return" "sizeof" "static" "struct"
+  "switch" "typedef" "union" "volatile" "while" "goto" "register"
 ] @keyword
-
-(null) @keyword
-(true) @keyword
-(false) @keyword
 )scm";
 
 constexpr const char* PYTHON_QUERY = R"scm(
 (comment) @comment
 (string) @string
+(escape_sequence) @escape
 (integer) @number
 (float) @number
-(identifier) @variable
-(type) @type
 
-(function_definition name: (identifier) @function)
-(call function: (identifier) @function)
+(decorator) @function
+(decorator (identifier) @function)
 (call function: (attribute attribute: (identifier) @function))
-(class_definition name: (identifier) @type)
-(decorator) @preprocessor
+(call function: (identifier) @function)
+(function_definition name: (identifier) @function)
+
+(attribute attribute: (identifier) @property)
+(type (identifier) @type)
+
+(none) @constant
+(true) @constant
+(false) @constant
 
 [
-  "and" "as" "assert" "async" "await" "break" "class" "continue"
-  "def" "del" "elif" "else" "except" "finally" "for" "from"
-  "global" "if" "import" "in" "is" "lambda" "nonlocal" "not"
-  "or" "pass" "raise" "return" "try" "while" "with" "yield"
-  "match" "case"
+  "as" "assert" "async" "await" "break" "class" "continue" "def"
+  "del" "elif" "else" "except" "finally" "for" "from" "global"
+  "if" "import" "lambda" "nonlocal" "pass" "raise" "return"
+  "try" "while" "with" "yield" "match" "case" "and" "in" "is"
+  "not" "or"
 ] @keyword
 
-(none) @keyword
-(true) @keyword
-(false) @keyword
+(identifier) @variable
 )scm";
 
 constexpr const char* MARKDOWN_QUERY = R"scm(
@@ -192,39 +225,58 @@ constexpr const char* YAML_QUERY = R"scm(
 (single_quote_scalar) @string
 (double_quote_scalar) @string
 (block_scalar) @string
+(escape_sequence) @escape
 (integer_scalar) @number
 (float_scalar) @number
-(boolean_scalar) @keyword
-(null_scalar) @keyword
-(anchor) @preprocessor
-(alias) @preprocessor
+(boolean_scalar) @constant
+(null_scalar) @constant
+(anchor) @label
+(alias) @label
 (tag) @type
-(block_mapping_pair key: (_) @variable)
-(flow_mapping key: (_) @variable)
+(block_mapping_pair key: (_) @property)
+(flow_mapping key: (_) @property)
+
+["[" "]" "{" "}"] @punctuation.bracket
+[":" "," "-" ">" "|"] @punctuation.delimiter
+["&" "*"] @operator
 )scm";
 
 constexpr const char* LUA_QUERY = R"scm(
 (comment) @comment
 (string) @string
 (number) @number
-(identifier) @variable
 
 (function_declaration name: (identifier) @function)
 (function_call name: (identifier) @function)
 (method_index_expression method: (identifier) @function)
-(dot_index_expression field: (identifier) @function)
+(function_definition) @function
+
+(parameters (identifier) @parameter)
+
+(dot_index_expression field: (identifier) @property)
+(bracket_index_expression) @property
+(field name: (identifier) @property)
+(table_constructor) @variable
+
+["(" ")" "[" "]" "{" "}"] @punctuation.bracket
+["," ";" "."] @punctuation.delimiter
+[":"] @punctuation
+
+["=" "+" "-" "*" "/" "%" "^" "#" "==" "~=" "<" ">" "<=" ">=" ".."] @operator
+["and" "or" "not"] @operator
 
 [
-  "and" "do" "else" "elseif" "end" "for" "function"
-  "goto" "if" "in" "local" "not" "or" "repeat" "return"
-  "then" "until" "while"
+  "do" "else" "elseif" "end" "for" "function"
+  "goto" "if" "in" "local" "repeat" "return"
+  "then" "until" "while" "break"
 ] @keyword
 
-(break_statement) @keyword
-(nil) @keyword
-(true) @keyword
-(false) @keyword
-(vararg_expression) @keyword
+(nil) @constant
+(true) @constant
+(false) @constant
+(vararg_expression) @variable
+
+(identifier) @variable
 )scm";
 
 constexpr const char* ZIG_QUERY = R"scm(
@@ -232,14 +284,43 @@ constexpr const char* ZIG_QUERY = R"scm(
 (string) @string
 (multiline_string) @string
 (character) @char
+(escape_sequence) @escape
 (integer) @number
 (float) @number
-(identifier) @variable
 
 (function_declaration name: (identifier) @function)
 (builtin_function) @function
 
-(boolean) @keyword
+(function_call) @function
+(call_expression function: (identifier) @function)
+
+(parameter (identifier) @parameter)
+
+(field_access field: (identifier) @property)
+(struct_initialization field: (identifier) @property)
+
+(primitive_type) @type
+(type_identifier) @type
+
+["(" ")" "[" "]" "{" "}"] @punctuation.bracket
+[";" ":" "," "."] @punctuation.delimiter
+["=" "+=" "-=" "*=" "/=" "%="] @operator
+["+" "-" "*" "/" "%" "&" "|" "^" "~" "!" "and" "or"] @operator
+["<" ">" "<=" ">=" "==" "!=" "<<" ">>"] @operator
+["=>" ".."] @operator
+
+[
+  "fn" "pub" "const" "var" "comptime" "inline" "noinline" "extern"
+  "if" "else" "switch" "while" "for" "break" "continue" "return"
+  "try" "catch" "defer" "errdefer" "orelse" "async" "await" "suspend" "resume"
+  "struct" "enum" "union" "error" "test" "usingnamespace" "unreachable"
+] @keyword
+
+(boolean) @constant
+(null) @constant
+(undefined) @constant
+
+(identifier) @variable
 )scm";
 
 constexpr const char* DIFF_QUERY = R"scm(
@@ -273,74 +354,89 @@ constexpr const char* TOML_QUERY = R"scm(
 (string) @string
 (integer) @number
 (float) @number
-(boolean) @keyword
-(local_date) @number
-(local_time) @number
-(local_date_time) @number
-(offset_date_time) @number
+(boolean) @constant
+(local_date) @constant
+(local_time) @constant
+(local_date_time) @constant
+(offset_date_time) @constant
 
-(bare_key) @variable
-(dotted_key) @variable
+(bare_key) @property
+(dotted_key) @property
 (quoted_key) @string
-(table (bare_key) @type)
-(table (dotted_key) @type)
-(table_array_element (bare_key) @type)
-(table_array_element (dotted_key) @type)
+(table (bare_key) @namespace)
+(table (dotted_key) @namespace)
+(table_array_element (bare_key) @namespace)
+(table_array_element (dotted_key) @namespace)
+
+["[" "]" "[[" "]]" "{" "}"] @punctuation.bracket
+["." "," "="] @punctuation.delimiter
 )scm";
 
 constexpr const char* JSON_QUERY = R"scm(
 (comment) @comment
 (string) @string
 (number) @number
-(pair key: (string) @variable)
-(null) @keyword
-(true) @keyword
-(false) @keyword
+(pair key: (string) @property)
+(escape_sequence) @escape
+
+["[" "]" "{" "}"] @punctuation.bracket
+[":" ","] @punctuation.delimiter
+
+(null) @constant
+(true) @constant
+(false) @constant
 )scm";
 
 constexpr const char* JAVASCRIPT_QUERY = R"scm(
-(comment) @comment
-(string) @string
-(template_string) @string
-(regex) @string
-(number) @number
 (identifier) @variable
-(property_identifier) @variable
+(property_identifier) @property
 
+(function_expression name: (identifier) @function)
 (function_declaration name: (identifier) @function)
 (method_definition name: (property_identifier) @function)
 (call_expression function: (identifier) @function)
 (call_expression function: (member_expression property: (property_identifier) @function))
-(class_declaration name: (identifier) @type)
+
+(this) @variable.builtin
+(super) @variable.builtin
 
 [
-  "async" "await" "break" "case" "catch" "class" "const" "continue"
-  "debugger" "default" "delete" "do" "else" "export" "extends" "finally"
-  "for" "function" "if" "import" "in" "instanceof" "let" "new" "of"
-  "return" "static" "switch" "throw" "try" "typeof"
-  "var" "void" "while" "with" "yield"
-] @keyword
+  (true)
+  (false)
+  (null)
+  (undefined)
+] @constant
 
-(null) @keyword
-(undefined) @keyword
-(true) @keyword
-(false) @keyword
-(this) @keyword
-(super) @keyword
+(comment) @comment
+
+[
+  (string)
+  (template_string)
+] @string
+
+(regex) @string
+(number) @number
+
+[
+  "as" "async" "await" "break" "case" "catch" "class" "const" "continue"
+  "debugger" "default" "delete" "do" "else" "export" "extends" "finally"
+  "for" "from" "function" "get" "if" "import" "in" "instanceof" "let"
+  "new" "of" "return" "set" "static" "switch" "target" "throw" "try"
+  "typeof" "var" "void" "while" "with" "yield"
+] @keyword
 )scm";
 
 constexpr const char* HTML_QUERY = R"scm(
 (comment) @comment
-(tag_name) @keyword
-(attribute_name) @variable
+(tag_name) @tag
+(attribute_name) @attribute
 (attribute_value) @string
 (quoted_attribute_value) @string
-(text) @string
 (doctype) @preprocessor
 (erroneous_end_tag_name) @comment
-(self_closing_tag) @keyword
-(start_tag) @keyword
-(end_tag) @keyword
+
+["<" ">" "</" "/>"] @punctuation.bracket
+["="] @operator
 )scm";
 
 constexpr const char* CSS_QUERY = R"scm(
@@ -348,22 +444,196 @@ constexpr const char* CSS_QUERY = R"scm(
 (string_value) @string
 (integer_value) @number
 (float_value) @number
-(color_value) @number
+(color_value) @constant
 (plain_value) @variable
 
-(tag_name) @keyword
+(tag_name) @tag
 (class_name) @type
 (id_name) @function
-(property_name) @variable
-(feature_name) @variable
-(attribute_name) @variable
+(property_name) @property
+(feature_name) @property
+(attribute_name) @attribute
 (function_name) @function
 
 (pseudo_class_selector (class_name) @function)
 (pseudo_element_selector (tag_name) @function)
 
+(unit) @constant
+
+["(" ")" "[" "]" "{" "}"] @punctuation.bracket
+[";" ":" ","] @punctuation.delimiter
+[">" "~" "+" "*"] @operator
+
 (important) @keyword
 (at_keyword) @preprocessor
+
+(namespace_name) @namespace
+)scm";
+
+constexpr const char* PHP_QUERY = R"scm(
+[
+  (php_tag)
+] @tag
+
+(comment) @comment
+
+[
+  (string)
+  (string_content)
+  (encapsed_string)
+  (heredoc)
+  (heredoc_body)
+  (nowdoc_body)
+] @string
+
+(boolean) @constant
+(null) @constant
+(integer) @number
+(float) @number
+
+(primitive_type) @type
+(cast_type) @type
+(named_type) @type
+
+(namespace_definition name: (namespace_name (name) @namespace))
+(namespace_name (name) @namespace)
+
+(variable_name) @variable
+
+(method_declaration name: (name) @function)
+(function_call_expression function: (name) @function)
+(scoped_call_expression name: (name) @function)
+(member_call_expression name: (name) @function)
+(function_definition name: (name) @function)
+
+(property_element (variable_name) @property)
+(member_access_expression name: (name) @property)
+
+[
+  "and" "as" "break" "case" "catch" "class" "clone" "const" "continue"
+  "declare" "default" "do" "echo" "else" "elseif" "enddeclare" "endfor"
+  "endforeach" "endif" "endswitch" "endwhile" "enum" "exit" "extends"
+  "finally" "fn" "for" "foreach" "function" "global" "goto" "if"
+  "implements" "include" "include_once" "instanceof" "insteadof" "interface"
+  "match" "namespace" "new" "or" "print" "require" "require_once" "return"
+  "switch" "throw" "trait" "try" "use" "while" "xor" "yield"
+  (abstract_modifier)
+  (final_modifier)
+  (readonly_modifier)
+  (static_modifier)
+  (visibility_modifier)
+] @keyword
+)scm";
+
+constexpr const char* BASH_QUERY = R"scm(
+(comment) @comment
+
+[
+  (string)
+  (raw_string)
+  (heredoc_body)
+  (heredoc_start)
+] @string
+
+(command_name) @function
+(function_definition name: (word) @function)
+
+(variable_name) @property
+
+(file_descriptor) @number
+
+[
+  (command_substitution)
+  (process_substitution)
+  (expansion)
+] @variable
+
+[
+  "case" "do" "done" "elif" "else" "esac" "export" "fi" "for" "function"
+  "if" "in" "select" "then" "unset" "until" "while"
+] @keyword
+)scm";
+
+constexpr const char* RUST_QUERY = R"scm(
+(line_comment) @comment
+(block_comment) @comment
+
+(char_literal) @string
+(string_literal) @string
+(raw_string_literal) @string
+(escape_sequence) @escape
+
+(integer_literal) @number
+(float_literal) @number
+(boolean_literal) @constant
+
+(type_identifier) @type
+(primitive_type) @type
+
+(call_expression function: (identifier) @function)
+(call_expression function: (field_expression field: (field_identifier) @function))
+(call_expression function: (scoped_identifier name: (identifier) @function))
+(generic_function function: (identifier) @function)
+(generic_function function: (scoped_identifier name: (identifier) @function))
+(generic_function function: (field_expression field: (field_identifier) @function))
+(macro_invocation macro: (identifier) @function)
+(function_item (identifier) @function)
+(function_signature_item (identifier) @function)
+
+(parameter (identifier) @parameter)
+(lifetime (identifier) @label)
+(field_identifier) @property
+
+(attribute_item) @attribute
+(inner_attribute_item) @attribute
+
+(crate) @keyword
+(mutable_specifier) @keyword
+(super) @keyword
+(self) @variable.builtin
+
+"as" @keyword
+"async" @keyword
+"await" @keyword
+"break" @keyword
+"const" @keyword
+"continue" @keyword
+"default" @keyword
+"dyn" @keyword
+"else" @keyword
+"enum" @keyword
+"extern" @keyword
+"fn" @keyword
+"for" @keyword
+"if" @keyword
+"impl" @keyword
+"in" @keyword
+"let" @keyword
+"loop" @keyword
+"match" @keyword
+"mod" @keyword
+"move" @keyword
+"pub" @keyword
+"ref" @keyword
+"return" @keyword
+"static" @keyword
+"struct" @keyword
+"trait" @keyword
+"type" @keyword
+"union" @keyword
+"unsafe" @keyword
+"use" @keyword
+"where" @keyword
+"while" @keyword
+"yield" @keyword
+)scm";
+
+constexpr const char* INI_QUERY = R"scm(
+(comment) @comment
+(section_name (text) @type)
+(setting (setting_name) @variable)
+["[" "]"] @operator
+"=" @operator
 )scm";
 
 LanguageRegistry::~LanguageRegistry() {
@@ -732,6 +1002,74 @@ void register_all_languages() {
                 {"/*", "*/"},
                 {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
                 {'{'}
+            };
+        }
+    });
+
+    registry.register_language({
+        "php",
+        {"php", "phtml", "php3", "php4", "php5", "php7", "phps"},
+        {},
+        []() -> LanguageConfig {
+            return {
+                "php",
+                tree_sitter_php,
+                PHP_QUERY,
+                "//",
+                {"/*", "*/"},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}},
+                {'{'}
+            };
+        }
+    });
+
+    registry.register_language({
+        "bash",
+        {"sh", "bash", "zsh", "ksh"},
+        {".bashrc", ".bash_profile", ".zshrc", ".profile"},
+        []() -> LanguageConfig {
+            return {
+                "bash",
+                tree_sitter_bash,
+                BASH_QUERY,
+                "#",
+                {},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}, {'`', '`'}},
+                {}
+            };
+        }
+    });
+
+    registry.register_language({
+        "rust",
+        {"rs"},
+        {},
+        []() -> LanguageConfig {
+            return {
+                "rust",
+                tree_sitter_rust,
+                RUST_QUERY,
+                "//",
+                {"/*", "*/"},
+                {{'(', ')'}, {'[', ']'}, {'{', '}'}, {'"', '"'}, {'\'', '\''}, {'<', '>'}},
+                {'{'}
+            };
+        }
+    });
+
+    registry.register_language({
+        "ini",
+        {"ini", "conf", "cfg", "desktop", "service", "editorconfig"},
+        {".gitconfig", ".npmrc", ".editorconfig"},
+        []() -> LanguageConfig {
+            return {
+                "ini",
+                tree_sitter_ini,
+                INI_QUERY,
+                ";",
+                {},
+                {{'[', ']'}, {'"', '"'}},
+                {}
             };
         }
     });

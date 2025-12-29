@@ -145,7 +145,7 @@ struct Editor {
         controller.handle_mouse_move(x, y, x_offset, y_offset, visible_width, visible_height, view);
     }
 
-    void handle_scroll(int wheel_x, int wheel_y, int char_width, bool shift_held) {
+    void handle_scroll(float wheel_x, float wheel_y, int char_width, bool shift_held) {
         view.handle_scroll(wheel_x, wheel_y, char_width, shift_held, document);
     }
 

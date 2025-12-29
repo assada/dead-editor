@@ -57,6 +57,7 @@ void Editor::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& textur
                     const Layout& layout,
                     std::function<SDL_Color(TokenType)> syntax_color_func) {
 
+    view.update_smooth_scroll(document);
     view.render(renderer, font, texture_cache,
                 document,
                 controller.cursor_line, controller.cursor_col,

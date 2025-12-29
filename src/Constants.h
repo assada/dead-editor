@@ -24,6 +24,21 @@ constexpr int TERMINAL_RESIZE_STEP = 50;
 constexpr int SCROLLBAR_WIDTH = 14;
 constexpr int SCROLLBAR_MIN_THUMB_HEIGHT = 30;
 
+constexpr bool SMOOTH_SCROLL_ENABLED = true;
+constexpr float SCROLL_SENSITIVITY = 1.0f; 
+constexpr float MOUSE_SCROLL_SENSITIVITY = 60.0f;
+constexpr float SCROLL_FAST_MULTIPLIER = 6.0f;
+constexpr float SCROLL_BOOST_THRESHOLD = 0.05f;
+constexpr float MOMENTUM_FRICTION = 0.95f; 
+constexpr Uint32 MOMENTUM_DELAY_MS = 20; 
+constexpr float MIN_LAUNCH_VELOCITY = 26.0f; 
+constexpr float VELOCITY_STOP_THRESHOLD = 0.2f;
+constexpr float TOUCHPAD_SCROLL_SENSITIVITY = 30.0f; 
+
+constexpr float SCROLL_ACCELERATION = 3.0f;
+constexpr float WHEEL_LERP_FACTOR = 0.25f; 
+constexpr float WHEEL_SNAP_THRESHOLD = 0.5f;
+
 constexpr int TAB_BAR_HEIGHT = 32;
 constexpr int TAB_PADDING = 12;
 constexpr int TAB_CLOSE_SIZE = 14;
@@ -56,7 +71,7 @@ constexpr const char* FONT_SEARCH_PATHS[] = {
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/System/Library/Fonts/Menlo.ttc",
     "/System/Library/Fonts/Monaco.ttf",
-    nullptr  // Sentinel
+    nullptr
 };
 
 namespace Colors {
@@ -86,7 +101,15 @@ namespace Colors {
     constexpr SDL_Color SYNTAX_PREPROC = {224, 108, 117, 255};
     constexpr SDL_Color SYNTAX_FUNCTION = {97, 175, 239, 255};
     constexpr SDL_Color SYNTAX_VARIABLE = {229, 192, 123, 255};
-
+    constexpr SDL_Color SYNTAX_PARAMETER = {171, 178, 191, 255};
+    constexpr SDL_Color SYNTAX_PROPERTY = {224, 108, 117, 255};
+    constexpr SDL_Color SYNTAX_CONSTANT = {86, 182, 194, 255};
+    constexpr SDL_Color SYNTAX_NAMESPACE = {229, 192, 123, 255};
+    constexpr SDL_Color SYNTAX_ATTRIBUTE = {198, 120, 221, 255};
+    constexpr SDL_Color SYNTAX_TAG = {224, 108, 117, 255};
+    constexpr SDL_Color SYNTAX_OPERATOR = {171, 178, 191, 255};
+    constexpr SDL_Color SYNTAX_PUNCTUATION = {140, 140, 150, 255};
+    constexpr SDL_Color SYNTAX_LABEL = {209, 154, 102, 255};
     constexpr SDL_Color GIT_MODIFIED = {229, 192, 123, 255};
     constexpr SDL_Color GIT_STAGED = {152, 195, 121, 255};
     constexpr SDL_Color GIT_UNTRACKED = {224, 108, 117, 255};

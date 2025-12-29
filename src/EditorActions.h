@@ -429,8 +429,8 @@ private:
         mapper_.bind({SDLK_RIGHT, KeyMod::None}, MoveRight, InputContext::Editor);
         mapper_.bind({SDLK_UP, KeyMod::None}, MoveUp, InputContext::Editor);
         mapper_.bind({SDLK_DOWN, KeyMod::None}, MoveDown, InputContext::Editor);
-        mapper_.bind({SDLK_LEFT, KeyMod::Ctrl}, MoveWordLeft, InputContext::Editor);
-        mapper_.bind({SDLK_RIGHT, KeyMod::Ctrl}, MoveWordRight, InputContext::Editor);
+        mapper_.bind({SDLK_LEFT, KeyMod::Alt}, MoveWordLeft, InputContext::Editor);
+        mapper_.bind({SDLK_RIGHT, KeyMod::Alt}, MoveWordRight, InputContext::Editor);
         mapper_.bind({SDLK_HOME, KeyMod::None}, MoveHome, InputContext::Editor);
         mapper_.bind({SDLK_END, KeyMod::None}, MoveEnd, InputContext::Editor);
         mapper_.bind({SDLK_PAGEUP, KeyMod::None}, MovePageUp, InputContext::Editor);
@@ -440,8 +440,8 @@ private:
         mapper_.bind({SDLK_RIGHT, KeyMod::Shift}, SelectRight, InputContext::Editor);
         mapper_.bind({SDLK_UP, KeyMod::Shift}, SelectUp, InputContext::Editor);
         mapper_.bind({SDLK_DOWN, KeyMod::Shift}, SelectDown, InputContext::Editor);
-        mapper_.bind({SDLK_LEFT, KeyMod::CtrlShift}, SelectWordLeft, InputContext::Editor);
-        mapper_.bind({SDLK_RIGHT, KeyMod::CtrlShift}, SelectWordRight, InputContext::Editor);
+        mapper_.bind({SDLK_LEFT, KeyMod::AltShift}, SelectWordLeft, InputContext::Editor);
+        mapper_.bind({SDLK_RIGHT, KeyMod::AltShift}, SelectWordRight, InputContext::Editor);
         mapper_.bind({SDLK_HOME, KeyMod::Shift}, SelectHome, InputContext::Editor);
         mapper_.bind({SDLK_END, KeyMod::Shift}, SelectEnd, InputContext::Editor);
         mapper_.bind({SDLK_PAGEUP, KeyMod::Shift}, SelectPageUp, InputContext::Editor);
@@ -452,29 +452,29 @@ private:
 
         mapper_.bind({SDLK_RETURN, KeyMod::None}, NewLine, InputContext::Editor);
         mapper_.bind({SDLK_BACKSPACE, KeyMod::None}, Backspace, InputContext::Editor);
-        mapper_.bind({SDLK_BACKSPACE, KeyMod::Ctrl}, BackspaceWord, InputContext::Editor);
+        mapper_.bind({SDLK_BACKSPACE, KeyMod::Alt}, BackspaceWord, InputContext::Editor);
         mapper_.bind({SDLK_DELETE, KeyMod::None}, Delete, InputContext::Editor);
-        mapper_.bind({SDLK_DELETE, KeyMod::Ctrl}, DeleteWord, InputContext::Editor);
+        mapper_.bind({SDLK_DELETE, KeyMod::Alt}, DeleteWord, InputContext::Editor);
         mapper_.bind({SDLK_TAB, KeyMod::None}, InsertTab, InputContext::Editor);
 
-        mapper_.bind({SDLK_a, KeyMod::Ctrl}, SelectAll, InputContext::Editor);
-        mapper_.bind({SDLK_c, KeyMod::Ctrl}, Copy, InputContext::Editor);
-        mapper_.bind({SDLK_x, KeyMod::Ctrl}, Cut, InputContext::Editor);
-        mapper_.bind({SDLK_v, KeyMod::Ctrl}, Paste, InputContext::Editor);
-        mapper_.bind({SDLK_z, KeyMod::Ctrl}, Undo, InputContext::Editor);
-        mapper_.bind({SDLK_z, KeyMod::CtrlShift}, Redo, InputContext::Editor);
-        mapper_.bind({SDLK_y, KeyMod::Ctrl}, Redo, InputContext::Editor);
+        mapper_.bind({SDLK_a, KeyMod::Primary}, SelectAll, InputContext::Editor);
+        mapper_.bind({SDLK_c, KeyMod::Primary}, Copy, InputContext::Editor);
+        mapper_.bind({SDLK_x, KeyMod::Primary}, Cut, InputContext::Editor);
+        mapper_.bind({SDLK_v, KeyMod::Primary}, Paste, InputContext::Editor);
+        mapper_.bind({SDLK_z, KeyMod::Primary}, Undo, InputContext::Editor);
+        mapper_.bind({SDLK_z, KeyMod::PrimaryShift}, Redo, InputContext::Editor);
+        mapper_.bind({SDLK_y, KeyMod::Primary}, Redo, InputContext::Editor);
 
-        mapper_.bind({SDLK_d, KeyMod::Ctrl}, DuplicateLine, InputContext::Editor);
-        mapper_.bind({SDLK_SLASH, KeyMod::Ctrl}, ToggleComment, InputContext::Editor);
+        mapper_.bind({SDLK_d, KeyMod::Primary}, DuplicateLine, InputContext::Editor);
+        mapper_.bind({SDLK_SLASH, KeyMod::Primary}, ToggleComment, InputContext::Editor);
 
-        mapper_.bind({SDLK_w, KeyMod::Ctrl}, ExpandSelection, InputContext::Editor);
-        mapper_.bind({SDLK_w, KeyMod::CtrlShift}, ShrinkSelection, InputContext::Editor);
+        mapper_.bind({SDLK_w, KeyMod::Primary}, ExpandSelection, InputContext::Editor);
+        mapper_.bind({SDLK_w, KeyMod::PrimaryShift}, ShrinkSelection, InputContext::Editor);
 
         mapper_.bind({SDLK_F12, KeyMod::None}, GoToDefinition, InputContext::Editor);
-        mapper_.bind({SDLK_LEFTBRACKET, KeyMod::CtrlShift}, ToggleFold, InputContext::Editor);
-        mapper_.bind({SDLK_k, KeyMod::CtrlShift}, FoldAll, InputContext::Editor);
-        mapper_.bind({SDLK_RIGHTBRACKET, KeyMod::CtrlShift}, UnfoldAll, InputContext::Editor);
+        mapper_.bind({SDLK_LEFTBRACKET, KeyMod::PrimaryShift}, ToggleFold, InputContext::Editor);
+        mapper_.bind({SDLK_k, KeyMod::PrimaryShift}, FoldAll, InputContext::Editor);
+        mapper_.bind({SDLK_RIGHTBRACKET, KeyMod::PrimaryShift}, UnfoldAll, InputContext::Editor);
     }
 
     ActionRegistry& registry_;

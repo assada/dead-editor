@@ -1,5 +1,56 @@
 #include "TextureCache.h"
 
+namespace {
+constexpr int TAB_WIDTH = 4;
+
+std::string expand_tabs(const std::string& text) {
+    std::string result;
+    result.reserve(text.size());
+    int column = 0;
+    for (char c : text) {
+        if (c == '\t') {
+            int spaces = TAB_WIDTH - (column % TAB_WIDTH);
+            result.append(spaces, ' ');
+            column += spaces;
+        } else {
+            result.push_back(c);
+            column++;
+        }
+    }
+    return result;
+}
+
+std::vector<Token> adjust_tokens_for_tabs(const std::string& original, const std::vector<Token>& tokens) {
+    std::vector<int> byte_to_expanded;
+    byte_to_expanded.reserve(original.size() + 1);
+    int expanded_pos = 0;
+    int column = 0;
+    for (size_t i = 0; i < original.size(); i++) {
+        byte_to_expanded.push_back(expanded_pos);
+        if (original[i] == '\t') {
+            int spaces = TAB_WIDTH - (column % TAB_WIDTH);
+            expanded_pos += spaces;
+            column += spaces;
+        } else {
+            expanded_pos++;
+            column++;
+        }
+    }
+    byte_to_expanded.push_back(expanded_pos);
+
+    std::vector<Token> adjusted;
+    adjusted.reserve(tokens.size());
+    for (const auto& tok : tokens) {
+        int new_start = (tok.start >= 0 && tok.start < static_cast<int>(byte_to_expanded.size()))
+            ? byte_to_expanded[tok.start] : tok.start;
+        int new_end = (tok.end >= 0 && tok.end < static_cast<int>(byte_to_expanded.size()))
+            ? byte_to_expanded[tok.end] : tok.end;
+        adjusted.push_back({tok.type, new_start, new_end});
+    }
+    return adjusted;
+}
+}
+
 void CachedLineRender::reset() {
     texture.reset();
     valid = false;
@@ -21,8 +72,11 @@ static SDL_Surface* render_tokenized_line(
     SDL_Color default_color,
     const std::function<SDL_Color(TokenType)>& get_color
 ) {
+    std::string expanded_text = expand_tabs(line_text);
+    std::vector<Token> expanded_tokens = adjust_tokens_for_tabs(line_text, tokens);
+
     int total_width = 0;
-    TTF_SizeUTF8(font, line_text.c_str(), &total_width, nullptr);
+    TTF_SizeUTF8(font, expanded_text.c_str(), &total_width, nullptr);
     if (total_width <= 0) return nullptr;
 
     SDL_Surface* target = SDL_CreateRGBSurfaceWithFormat(
@@ -45,19 +99,19 @@ static SDL_Surface* render_tokenized_line(
         }
     };
 
-    if (tokens.empty()) {
-        blit_segment(line_text, default_color);
+    if (expanded_tokens.empty()) {
+        blit_segment(expanded_text, default_color);
     } else {
         int prev_end = 0;
-        for (const auto& tok : tokens) {
+        for (const auto& tok : expanded_tokens) {
             if (tok.start > prev_end) {
-                blit_segment(line_text.substr(prev_end, tok.start - prev_end), default_color);
+                blit_segment(expanded_text.substr(prev_end, tok.start - prev_end), default_color);
             }
-            blit_segment(line_text.substr(tok.start, tok.end - tok.start), get_color(tok.type));
+            blit_segment(expanded_text.substr(tok.start, tok.end - tok.start), get_color(tok.type));
             prev_end = tok.end;
         }
-        if (prev_end < static_cast<int>(line_text.size())) {
-            blit_segment(line_text.substr(prev_end), default_color);
+        if (prev_end < static_cast<int>(expanded_text.size())) {
+            blit_segment(expanded_text.substr(prev_end), default_color);
         }
     }
 
@@ -99,7 +153,8 @@ uint64_t TextureCache::make_text_key(const std::string& text, SDL_Color color) {
 }
 
 SDL_Surface* TextureCache::render_text_to_surface(const std::string& text, SDL_Color color) {
-    return TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    std::string expanded = expand_tabs(text);
+    return TTF_RenderUTF8_Blended(font, expanded.c_str(), color);
 }
 
 void TextureCache::render_cached_text(const std::string& text, SDL_Color color, int x, int y) {

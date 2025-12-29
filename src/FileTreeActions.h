@@ -216,7 +216,7 @@ private:
         mapper_.bind({SDLK_ESCAPE, KeyMod::None}, Escape, InputContext::FileTree);
         mapper_.bind({SDLK_BACKSPACE, KeyMod::None}, Backspace, InputContext::FileTree);
         mapper_.bind({SDLK_DELETE, KeyMod::None}, Delete, InputContext::FileTree);
-        mapper_.bind({SDLK_n, KeyMod::Ctrl}, Create, InputContext::FileTree);
+        mapper_.bind({SDLK_n, KeyMod::Primary}, Create, InputContext::FileTree);
     }
 
     ActionRegistry& registry_;

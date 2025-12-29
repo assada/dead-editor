@@ -1,5 +1,5 @@
 project('dead_editor', ['c', 'cpp'],
-  version : '0.5.0',
+  version : '0.6.0',
   default_options : ['cpp_std=c++23', 'c_std=c11', 'warning_level=2']
 )
 
@@ -69,6 +69,18 @@ ts_html_dep = ts_html_proj.get_variable('tree_sitter_html_dep')
 ts_css_proj = subproject('tree-sitter-css')
 ts_css_dep = ts_css_proj.get_variable('tree_sitter_css_dep')
 
+ts_php_proj = subproject('tree-sitter-php')
+ts_php_dep = ts_php_proj.get_variable('tree_sitter_php_dep')
+
+ts_bash_proj = subproject('tree-sitter-bash')
+ts_bash_dep = ts_bash_proj.get_variable('tree_sitter_bash_dep')
+
+ts_rust_proj = subproject('tree-sitter-rust')
+ts_rust_dep = ts_rust_proj.get_variable('tree_sitter_rust_dep')
+
+ts_ini_proj = subproject('tree-sitter-ini')
+ts_ini_dep = ts_ini_proj.get_variable('tree_sitter_ini_dep')
+
 sources = [
   'src/main.cpp',
   'src/Application.cpp',
@@ -92,7 +104,8 @@ dead_editor = executable('DeadEditor',
     sdl2_dep, sdl2_ttf_dep, ts_core_dep, util_dep, vterm_dep,
     ts_cpp_dep, ts_c_dep, ts_python_dep, ts_markdown_dep,
     ts_yaml_dep, ts_lua_dep, ts_zig_dep, ts_diff_dep, ts_meson_dep,
-    ts_toml_dep, ts_json_dep, ts_javascript_dep, ts_html_dep, ts_css_dep
+    ts_toml_dep, ts_json_dep, ts_javascript_dep, ts_html_dep, ts_css_dep,
+    ts_php_dep, ts_bash_dep, ts_rust_dep, ts_ini_dep
   ],
   install : true
 )

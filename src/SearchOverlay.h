@@ -170,7 +170,7 @@ public:
         render_results(renderer, cache, font, x, y, overlay_w, overlay_h, pad, input_h, line_h);
     }
 
-    bool has_ripgrep() const { return ripgrep_available_; }
+    bool has_ripgrep() const { return !ripgrep_path_.empty(); }
 
 private:
     static constexpr int INPUT_HEIGHT = 44;
@@ -191,17 +191,44 @@ private:
     int selected_idx_ = 0;
     int scroll_offset_ = 0;
     mutable int visible_count_ = 10;
-    bool ripgrep_available_ = false;
+    std::string ripgrep_path_;
     bool ripgrep_checked_ = false;
     OnErrorCallback on_error_;
 
     bool check_ripgrep_available() {
-        if (ripgrep_checked_) return ripgrep_available_;
+        if (ripgrep_checked_) return !ripgrep_path_.empty();
 
         ripgrep_checked_ = true;
-        std::string check_cmd = "command -v rg >/dev/null 2>&1";
-        ripgrep_available_ = (system(check_cmd.c_str()) == 0);
-        return ripgrep_available_;
+        ripgrep_path_ = find_ripgrep();
+        return !ripgrep_path_.empty();
+    }
+
+    static std::string find_ripgrep() {
+        std::vector<std::string> candidates = {
+            "rg",
+#ifdef __APPLE__
+            "/opt/homebrew/bin/rg",
+            "/usr/local/bin/rg",
+#endif
+            "/usr/bin/rg",
+        };
+
+        const char* home = std::getenv("HOME");
+        if (home) {
+            candidates.push_back(std::string(home) + "/.cargo/bin/rg");
+        }
+
+        for (const auto& path : candidates) {
+            if (path == "rg") {
+                std::string check_cmd = "command -v rg >/dev/null 2>&1";
+                if (system(check_cmd.c_str()) == 0) {
+                    return "rg";
+                }
+            } else if (std::filesystem::exists(path)) {
+                return path;
+            }
+        }
+        return "";
     }
 
     void ensure_visible() {
@@ -247,7 +274,9 @@ private:
     void execute_search(const std::string& query, const std::string& root) {
         std::string escaped_query = escape_shell_arg(query);
         std::string cmd = std::format(
-            "rg --vimgrep --sortr=accessed --no-heading --smart-case --color never --max-count 100 "
+            "{} --vimgrep --sortr=accessed --no-heading --smart-case --color never --max-count 100 ",
+            escape_shell_arg(ripgrep_path_)
+        ) + std::format(
             "--max-columns 500 {} {} 2>/dev/null",
             escaped_query, escape_shell_arg(root)
         );

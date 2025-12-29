@@ -1,0 +1,9 @@
+[wrap-git]
+url = https://github.com/tree-sitter/tree-sitter-bash.git
+revision = v0.25.1
+depth = 1
+patch_directory = tree-sitter-bash
+
+[provide]
+dependency_names = tree-sitter-bash
+

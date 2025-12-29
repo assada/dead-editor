@@ -5,7 +5,6 @@
 struct Layout {
     float scale = 1.0f;
 
-    // Scaled values
     int padding;
     int status_bar_height;
     int tab_bar_height;
@@ -57,13 +56,11 @@ struct Layout {
         scrollbar_min_thumb_height = scaled(SCROLLBAR_MIN_THUMB_HEIGHT);
     }
 
-    // Scale any arbitrary value
     template<typename T>
     int scaled(T value) const {
         return static_cast<int>(value * scale);
     }
 
-    // Scale mouse coordinates
     int mouse_x(int x) const { return static_cast<int>(x * scale); }
     int mouse_y(int y) const { return static_cast<int>(y * scale); }
 };
