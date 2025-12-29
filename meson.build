@@ -97,6 +97,15 @@ sources = [
   'src/CommandManager.cpp',
 ]
 
+if host_machine.system() == 'darwin'
+  add_languages('objcpp', native: false)
+  sources += 'src/PlatformInit_macos.mm'
+  cocoa_dep = dependency('appleframeworks', modules: ['Foundation'])
+else
+  sources += 'src/PlatformInit_default.cpp'
+  cocoa_dep = dependency('', required: false)
+endif
+
 dead_editor = executable('DeadEditor',
   sources,
   version_h,
@@ -105,7 +114,7 @@ dead_editor = executable('DeadEditor',
     ts_cpp_dep, ts_c_dep, ts_python_dep, ts_markdown_dep,
     ts_yaml_dep, ts_lua_dep, ts_zig_dep, ts_diff_dep, ts_meson_dep,
     ts_toml_dep, ts_json_dep, ts_javascript_dep, ts_html_dep, ts_css_dep,
-    ts_php_dep, ts_bash_dep, ts_rust_dep, ts_ini_dep
+    ts_php_dep, ts_bash_dep, ts_rust_dep, ts_ini_dep, cocoa_dep
   ],
   install : true
 )
