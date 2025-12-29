@@ -25,19 +25,13 @@ constexpr int SCROLLBAR_WIDTH = 14;
 constexpr int SCROLLBAR_MIN_THUMB_HEIGHT = 30;
 
 constexpr bool SMOOTH_SCROLL_ENABLED = true;
-constexpr float SCROLL_SENSITIVITY = 1.0f; 
-constexpr float MOUSE_SCROLL_SENSITIVITY = 60.0f;
-constexpr float SCROLL_FAST_MULTIPLIER = 6.0f;
-constexpr float SCROLL_BOOST_THRESHOLD = 0.05f;
-constexpr float MOMENTUM_FRICTION = 0.95f; 
-constexpr Uint32 MOMENTUM_DELAY_MS = 20; 
-constexpr float MIN_LAUNCH_VELOCITY = 26.0f; 
-constexpr float VELOCITY_STOP_THRESHOLD = 0.2f;
-constexpr float TOUCHPAD_SCROLL_SENSITIVITY = 30.0f; 
-
-constexpr float SCROLL_ACCELERATION = 3.0f;
-constexpr float WHEEL_LERP_FACTOR = 0.25f; 
-constexpr float WHEEL_SNAP_THRESHOLD = 0.5f;
+constexpr int MOUSE_SCROLL_LINES = 3;
+constexpr float TOUCHPAD_SCROLL_MULTIPLIER = 30.0f;
+constexpr float TOUCHPAD_FAST_MULTIPLIER = 15.0f;
+constexpr float MOMENTUM_FRICTION = 0.92f;
+constexpr Uint32 MOMENTUM_DELAY_MS = 30;
+constexpr float MIN_LAUNCH_VELOCITY = 20.0f;
+constexpr float VELOCITY_STOP_THRESHOLD = 0.5f;
 
 constexpr int TAB_BAR_HEIGHT = 32;
 constexpr int TAB_PADDING = 12;

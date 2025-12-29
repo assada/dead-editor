@@ -393,51 +393,61 @@ void EditorView::ensure_visible_x(int cursor_pixel_x, int visible_width, int mar
 
 void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool shift_held, const TextDocument& doc) {
     if (shift_held) {
-        wheel_x = wheel_y; 
+        wheel_x = wheel_y;
         wheel_y = 0;
     }
-    
+
     Uint32 now = SDL_GetTicks();
     float dt_ms = static_cast<float>(now - last_scroll_event_time);
 
+    auto is_discrete_input = [](float value) {
+        return std::abs(value - std::round(value)) < 0.001f && std::abs(value) >= 0.99f;
+    };
+
+    auto compute_delta = [this](float wheel_value, bool is_discrete) -> float {
+        float input = std::abs(wheel_value);
+        float delta;
+
+        if (is_discrete) {
+            delta = input * static_cast<float>(line_height * MOUSE_SCROLL_LINES);
+        } else {
+            float linear_part = input * TOUCHPAD_SCROLL_MULTIPLIER;
+            float quadratic_part = (input * input) * TOUCHPAD_FAST_MULTIPLIER;
+            delta = linear_part + quadratic_part;
+        }
+
+        return (wheel_value < 0) ? -delta : delta;
+    };
+
     if (std::abs(wheel_x) > 0.001f) {
-        float input = std::abs(wheel_x);
-        float linear_part = input * SCROLL_SENSITIVITY;
-        float quadratic_part = (input * input) * SCROLL_FAST_MULTIPLIER;
-        
-        float delta = linear_part + quadratic_part;
-        
-        if (wheel_x < 0) delta = -delta;
+        bool is_discrete = is_discrete_input(wheel_x);
+        float delta = compute_delta(wheel_x, is_discrete);
 
         precise_scroll_x += delta;
         precise_scroll_x = std::max(0.0, precise_scroll_x);
 
-        if (dt_ms > 30.0f) velocity_x = 0.0;
-        
+        if (dt_ms > 50.0f) velocity_x = 0.0;
+
         double instant_velocity = delta;
-        velocity_x = (velocity_x * 0.2) + (instant_velocity * 0.8);
-        
+        velocity_x = is_discrete ? 0.0 : (velocity_x * 0.3) + (instant_velocity * 0.7);
+
         scroll_state = ScrollState::DirectControl;
         last_scroll_event_time = now;
     }
 
-    if (std::abs(wheel_y) > 0.0001f) {        
-        float input = std::abs(wheel_y);
-        float linear_part = input * SCROLL_SENSITIVITY;
-        float quadratic_part = (input * input) * SCROLL_FAST_MULTIPLIER;
-        float delta = linear_part + quadratic_part;
-        
-        if (wheel_y < 0) delta = -delta;
-        
+    if (std::abs(wheel_y) > 0.0001f) {
+        bool is_discrete = is_discrete_input(wheel_y);
+        float delta = compute_delta(wheel_y, is_discrete);
+
         precise_scroll_y -= delta;
-        
-        if (dt_ms > 30.0f) velocity_y = 0.0;
+
+        if (dt_ms > 50.0f) velocity_y = 0.0;
         double instant_velocity = -delta;
-        velocity_y = (velocity_y * 0.2) + (instant_velocity * 0.8);
-        
+        velocity_y = is_discrete ? 0.0 : (velocity_y * 0.3) + (instant_velocity * 0.7);
+
         scroll_state = ScrollState::DirectControl;
         last_scroll_event_time = now;
-        
+
         float max_scroll = get_max_scroll_pixels(doc);
         clamp_scroll_values(max_scroll);
     }
@@ -445,7 +455,7 @@ void EditorView::handle_scroll(float wheel_x, float wheel_y, int char_w, bool sh
 
 void EditorView::update_smooth_scroll(const TextDocument& doc) {
     Uint32 now = SDL_GetTicks();
-    double dt = std::min((now - last_update_time) / 16.0, 4.0); 
+    double dt = std::min((now - last_update_time) / 16.0, 4.0);
     last_update_time = now;
 
     float max_scroll_y = get_max_scroll_pixels(doc);
@@ -475,7 +485,7 @@ void EditorView::update_smooth_scroll(const TextDocument& doc) {
             if (std::abs(velocity_x) > VELOCITY_STOP_THRESHOLD) {
                 precise_scroll_x += velocity_x * dt;
                 velocity_x *= std::pow(MOMENTUM_FRICTION, dt);
-                
+
                 if (precise_scroll_x < 0.0) {
                     precise_scroll_x = 0.0;
                     velocity_x = 0.0;
@@ -495,6 +505,9 @@ void EditorView::update_smooth_scroll(const TextDocument& doc) {
             if (velocity_x == 0.0 && velocity_y == 0.0) {
                 scroll_state = ScrollState::Idle;
             }
+            break;
+
+        case ScrollState::AnimatingToTarget:
             break;
     }
 
@@ -529,7 +542,7 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
     int visible_end_y = y_offset + visible_height;
     int visible_lines = visible_height / line_height;
     int text_x = x_offset + GUTTER_WIDTH + PADDING - scroll_x;
-    
+
     int pixel_offset = static_cast<int>(precise_scroll_y) % line_height;
     int y = y_offset - pixel_offset;
 
@@ -574,7 +587,7 @@ void EditorView::render(SDL_Renderer* renderer, TTF_Font* font, TextureCache& te
     const_cast<EditorView*>(this)->prefetch_viewport_tokens(scroll_y, visible_lines + 5, doc);
 
     y = y_offset - pixel_offset;
-    
+
     for (int i = scroll_y; i < static_cast<int>(doc.lines.size()) && y < visible_end_y; i++) {
         if (is_line_folded(i)) continue;
 
@@ -782,7 +795,7 @@ void EditorView::clear_caches() {
     fold_regions.clear();
     fold_regions.shrink_to_fit();
     folded_lines.clear();
-    
+
     precise_scroll_x = 0.0;
     velocity_x = 0.0;
     scroll_x = 0;
